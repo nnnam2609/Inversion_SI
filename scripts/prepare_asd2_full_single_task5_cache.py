@@ -440,18 +440,22 @@ def assemble_bucket(config: Dict[str, Any], cache_dir: Path, split_key: str, buc
     tensors_std = [torch.tensor(seq, dtype=torch.float32) for seq in std_items]
     tensors_mean = [torch.tensor(seq, dtype=torch.float32) for seq in mean_items]
 
-    padded_labels = pad_sequence(tensors_outputs, batch_first=True)
+    target_sequence_length = int(config["sequence_length"])
+    padded_inputs = pad_time_dim(pad_sequence(tensors_inputs, batch_first=True), target_sequence_length)
+    padded_labels = pad_time_dim(pad_sequence(tensors_outputs, batch_first=True), target_sequence_length)
+    padded_frames = pad_time_dim(pad_sequence(tensors_frames, batch_first=True), target_sequence_length)
+    padded_phonemes = pad_time_dim(pad_sequence(tensors_phonemes, batch_first=True), target_sequence_length)
     sample_count = len(tensors_outputs)
     state = {
-        "features": pad_sequence(tensors_inputs, batch_first=True),
+        "features": padded_inputs,
         "labels": padded_labels.view(
             sample_count,
-            config["sequence_length"],
+            target_sequence_length,
             len(config["classes"]),
             config["output_layer"],
         ),
-        "frames": pad_sequence(tensors_frames, batch_first=True),
-        "phonemes": pad_sequence(tensors_phonemes, batch_first=True),
+        "frames": padded_frames,
+        "phonemes": padded_phonemes,
         "std": pad_sequence(tensors_std, batch_first=True),
         "mean": pad_sequence(tensors_mean, batch_first=True),
         "mean_datas": recompute_mean_datas(
@@ -498,6 +502,21 @@ def recompute_mean_datas(labels: torch.Tensor, lengths: List[int]) -> torch.Tens
     if total_frames == 0:
         raise ValueError("Cannot recompute mean_datas with zero total frames")
     return total / total_frames
+
+
+def pad_time_dim(tensor: torch.Tensor, target_length: int, dim: int = 1) -> torch.Tensor:
+    current_length = int(tensor.shape[dim])
+    if current_length == target_length:
+        return tensor
+    if current_length > target_length:
+        index = [slice(None)] * tensor.ndim
+        index[dim] = slice(0, target_length)
+        return tensor[tuple(index)].contiguous()
+
+    pad_shape = list(tensor.shape)
+    pad_shape[dim] = target_length - current_length
+    padding = torch.zeros(*pad_shape, dtype=tensor.dtype)
+    return torch.cat([tensor, padding], dim=dim)
 
 
 def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebuild: bool) -> Dict[str, Any]:

@@ -197,7 +197,7 @@ class Corpus_contours(Corpus):
             start = sentence.minTime
             end   = sentence.maxTime
             label = sentence.mark
-            if label not in silence_labels:
+            if label not in silence_labels and label.strip():
                 start_sample = start * sample_rate
                 end_sample = end * sample_rate
                 index_begin = int(np.floor(start_sample/ hop_length_samples))
@@ -222,7 +222,7 @@ class Corpus_contours(Corpus):
                         if len(list_mfcc) == self.config['sequence_length'] :
                             all_sentences.append(np.array(list_mfcc))
                             all_sentences_image.append(np.array(list_image))
-                            all_sentences_phonemes.append(np.array(list_phonemes))
+                            all_sentences_phonemes.append(np.array(list_phonemes, dtype=object))
                             all_sentences_phonemes_one_hot.append(np.array(list_phonemes_one_hot))
                             list_mfcc = []
                             list_image = []
@@ -245,7 +245,7 @@ class Corpus_contours(Corpus):
                 if list_mfcc:
                     all_sentences.append(np.array(list_mfcc))
                     all_sentences_image.append(np.array(list_image))
-                    all_sentences_phonemes.append(np.array(list_phonemes))
+                    all_sentences_phonemes.append(np.array(list_phonemes, dtype=object))
                     all_sentences_phonemes_one_hot.append(np.array(list_phonemes_one_hot))
         return all_sentences, all_sentences_image, all_sentences_phonemes, all_sentences_phonemes_one_hot
        

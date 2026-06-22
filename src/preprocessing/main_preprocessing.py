@@ -19,6 +19,12 @@ from transformers import Wav2Vec2Processor, Wav2Vec2Model
 from transformers import AutoFeatureExtractor, HubertModel
 
 
+def _numeric_id(value):
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if not digits:
+        raise ValueError(f"Cannot extract numeric id from {value!r}")
+    return float(digits)
+
 
 class Corpus(Dataset):
     """
@@ -162,39 +168,75 @@ class Corpus(Dataset):
         audio_files = {}
         textgrid_files = {}
         images_files = {}
+        dataset_type = self.config.get("dataset_type", "asd2").lower()
         
         for sequence, sessions in tqdm(self.config[self.sequences].items(), desc=f"Reading {self.sequences}"):
             audio_files[sequence] = []
             textgrid_files[sequence] = []
             images_files[sequence] = []
             for session in sessions:
-                audio_folder = os.path.join(self.config['datadir'], sequence, session)
-                if not os.path.isdir(audio_folder):
-                    raise FileNotFoundError(f"Missing session folder: {audio_folder}")
-                contour_candidates = [
-                    os.path.join(audio_folder, 'inference_contours_registered'),
-                    os.path.join(audio_folder, 'inference_contours'),
-                ]
-                image_folder = next((path for path in contour_candidates if os.path.isdir(path)), None)
-                wav_candidates = [
-                    file_name
-                    for file_name in sorted(os.listdir(audio_folder))
-                    if file_name.endswith('.wav') and not file_name.endswith('_mocap.wav')
-                ]
-                if not wav_candidates:
-                    raise FileNotFoundError(f"No non-mocap WAV found in: {audio_folder}")
-                audio_file = wav_candidates[0]
-                audio_files[sequence].append(os.path.join(audio_folder, audio_file))
-                name = os.path.splitext(audio_file)[0]
-                textgrid_file = f'{name}_adjusted.textgrid'
-                #textgrid_file = f'{name}_original.textgrid'
-                textgrid_files[sequence].append(os.path.join(audio_folder, textgrid_file))
-                if image_folder is None:
-                    raise FileNotFoundError(
-                        f"Missing contour folder: {contour_candidates[0]} or {contour_candidates[1]}"
-                    )
+                if dataset_type == "asd1":
+                    audio_file, textgrid_file, image_folder = self._resolve_asd1_session(sequence, session)
+                elif dataset_type == "asd2":
+                    audio_file, textgrid_file, image_folder = self._resolve_asd2_session(sequence, session)
+                else:
+                    raise ValueError(f"Unsupported dataset_type={dataset_type!r}; expected 'asd1' or 'asd2'")
+                audio_files[sequence].append(audio_file)
+                textgrid_files[sequence].append(textgrid_file)
                 images_files[sequence].append(image_folder)
         return audio_files, textgrid_files, images_files
+
+    def _resolve_asd2_session(self, sequence: str, session: str) -> tuple:
+        audio_folder = os.path.join(self.config['datadir'], sequence, session)
+        if not os.path.isdir(audio_folder):
+            raise FileNotFoundError(f"Missing ASD2 session folder: {audio_folder}")
+        contour_candidates = [
+            os.path.join(audio_folder, 'inference_contours_registered'),
+            os.path.join(audio_folder, 'inference_contours'),
+        ]
+        image_folder = next((path for path in contour_candidates if os.path.isdir(path)), None)
+        wav_candidates = [
+            file_name
+            for file_name in sorted(os.listdir(audio_folder))
+            if file_name.endswith('.wav') and not file_name.endswith('_mocap.wav')
+        ]
+        if not wav_candidates:
+            raise FileNotFoundError(f"No non-mocap WAV found in ASD2 session: {audio_folder}")
+        audio_file = wav_candidates[0]
+        audio_path = os.path.join(audio_folder, audio_file)
+        name = os.path.splitext(audio_file)[0]
+        textgrid_path = os.path.join(audio_folder, f'{name}_adjusted.textgrid')
+        if not os.path.exists(textgrid_path):
+            raise FileNotFoundError(f"Missing ASD2 TextGrid: {textgrid_path}")
+        if image_folder is None:
+            raise FileNotFoundError(
+                f"Missing ASD2 contour folder: {contour_candidates[0]} or {contour_candidates[1]}"
+            )
+        return audio_path, textgrid_path, image_folder
+
+    def _resolve_asd1_session(self, sequence: str, session: str) -> tuple:
+        speaker = str(sequence)
+        other_folder = os.path.join(self.config['datadir'], speaker, "OTHER", session)
+        dcm_folder = os.path.join(self.config['datadir'], speaker, "DCM_2D", session)
+        if not os.path.isdir(other_folder):
+            raise FileNotFoundError(f"Missing ASD1 OTHER session folder: {other_folder}")
+        if not os.path.isdir(dcm_folder):
+            raise FileNotFoundError(f"Missing ASD1 DCM_2D session folder: {dcm_folder}")
+
+        audio_path = os.path.join(other_folder, f"DENOISED_SOUND_{speaker}_{session}.wav")
+        textgrid_path = os.path.join(other_folder, f"TEXT_ALIGNMENT_{speaker}_{session}.textgrid")
+        contour_root = self.config.get("asd1_annotation_dir")
+        if not contour_root:
+            raise ValueError("dataset_type='asd1' requires config['asd1_annotation_dir']")
+        image_folder = os.path.join(contour_root, speaker, session, "contours")
+
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Missing ASD1 WAV: {audio_path}")
+        if not os.path.exists(textgrid_path):
+            raise FileNotFoundError(f"Missing ASD1 TextGrid: {textgrid_path}")
+        if not os.path.isdir(image_folder):
+            raise FileNotFoundError(f"Missing ASD1 BF contour folder: {image_folder}")
+        return audio_path, textgrid_path, image_folder
     
     def print_gpu_memory(self):
         try:
@@ -861,11 +903,13 @@ class Corpus(Dataset):
                 - phonemes_in_interval_one_hot (list): List of one-hot encoded phoneme labels.
         """
 
-        phonemes = tg[2]
-        phonemes_in_interval = []
-        phonemes_in_interval_one_hot = []
+        phoneme_tier_index = int(self.config.get("phoneme_tier_index", 2))
+        if phoneme_tier_index >= len(tg):
+            phoneme_tier_index = len(tg) - 1
+        phonemes = tg[phoneme_tier_index]
         phonemes_to_replace = ['','2h', 'eh', 'ih', 'uh', 'yh']
         short_distance = float('inf')
+        best_mark = '#'
         for phoneme in phonemes.intervals:
             if phoneme.maxTime < mid_sec or phoneme.minTime > mid_sec:
                 continue  # Skip intervals outside the range
@@ -876,16 +920,17 @@ class Corpus(Dataset):
                 current_distance = min(distance_to_start, distance_to_end)
                 if current_distance < short_distance:
                     short_distance = current_distance
-                    if phoneme.mark in phonemes_to_replace:
-                        phoneme.mark = '#'
-                    if '*' in phoneme.mark:
-                        phoneme.mark = '#'
-                    # elif phoneme.mark == 'S':
-                    #     phoneme.mark = 's'
-                    one_hot_encoded_label = all_phonemes[phoneme.mark]
-                    phonemes_in_interval_one_hot.append(one_hot_encoded_label)
-                    phonemes_in_interval.append(phoneme.mark)
-        return phonemes_in_interval, phonemes_in_interval_one_hot
+                    mark = phoneme.mark
+                    if not mark.strip():
+                        mark = '#'
+                    if mark in phonemes_to_replace:
+                        mark = '#'
+                    if '*' in mark:
+                        mark = '#'
+                    best_mark = mark
+        if best_mark not in all_phonemes:
+            best_mark = '#'
+        return [best_mark], [all_phonemes[best_mark]]
     
     # Abstractmethod     
 
@@ -1060,12 +1105,16 @@ class Corpus(Dataset):
                     image_filename  = f"{int_image_number:04d}_{articulator}.npy"
                     image_path = os.path.join(image_folder, image_filename)
                     parts = image_path.split("/")
-                    folder_number = parts[-4]  # "1775"
+                    folder_number = parts[-4]  # "1775" or "P1"
                     subfolder = parts[-3]  # "S19"
                     subfolder_number = subfolder[1:]  # Remove the 'S' from "S19"
                     file_name = os.path.splitext(parts[-1])[0]  # "0190_tongue" without ".npy"
                     file_name_number = file_name.split('_')[0]
-                    image_data = np.array([folder_number, subfolder_number, file_name_number],dtype=float)
+                    image_data = np.array([
+                        _numeric_id(folder_number),
+                        _numeric_id(subfolder_number),
+                        float(file_name_number),
+                    ], dtype=float)
                     
                     # image_data = np.concatenate((image_data, spm_data, ll_data, ul_data))
                 elif isinstance(image_number, float):
@@ -1073,12 +1122,16 @@ class Corpus(Dataset):
                     image_filename  = f"{rounded_down:04d}.5_{articulator}.npy"
                     image_path = os.path.join(image_folder, image_filename)
                     parts = image_path.split("/")
-                    folder_number = parts[-4]  # "1775"
+                    folder_number = parts[-4]  # "1775" or "P1"
                     subfolder = parts[-3]  # "S19"
                     subfolder_number = subfolder[1:]  # Remove the 'S' from "S19"
                     file_name = os.path.splitext(parts[-1])[0]  # "0190_tongue" without ".npy"
                     file_name_number = file_name.split('_')[0]
-                    image_data = np.array([folder_number, subfolder_number, file_name_number],dtype=float)
+                    image_data = np.array([
+                        _numeric_id(folder_number),
+                        _numeric_id(subfolder_number),
+                        float(file_name_number.split(".")[0]) + 0.5,
+                    ], dtype=float)
                 if image_data is not None:
                     sequence_images[seq_idx,:] = image_data
 
