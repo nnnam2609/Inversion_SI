@@ -32,6 +32,8 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export REBUILD_PARTS="${REBUILD_PARTS:-1}"
+export REBUILD_ASSEMBLED="${REBUILD_ASSEMBLED:-1}"
 
 log_summary() {
   echo "$*" | tee -a "${SUMMARY_LOG}"
@@ -59,14 +61,22 @@ PY
 
 preprocess_start=$(date +%s)
 log_summary "preprocess_started_at=$(date -Is)"
-python scripts/prepare_asd2_full_single_task5_cache.py \
+preprocess_args=(
+  scripts/prepare_asd2_full_single_task5_cache.py
   --config "${CONFIG_PATH}" \
   --splits train_sequences valid_sequences test_sequences \
   --max-workers 4 \
-  --rebuild-parts \
-  --rebuild-assembled \
-  --progress-every 10 \
-  2>&1 | tee "${PREPROCESS_LOG}"
+  --progress-every 10
+)
+if [[ "${REBUILD_PARTS}" == "1" ]]; then
+  preprocess_args+=(--rebuild-parts)
+fi
+if [[ "${REBUILD_ASSEMBLED}" == "1" ]]; then
+  preprocess_args+=(--rebuild-assembled)
+fi
+log_summary "REBUILD_PARTS=${REBUILD_PARTS}"
+log_summary "REBUILD_ASSEMBLED=${REBUILD_ASSEMBLED}"
+python "${preprocess_args[@]}" 2>&1 | tee "${PREPROCESS_LOG}"
 preprocess_end=$(date +%s)
 log_summary "preprocess_finished_at=$(date -Is)"
 log_summary "preprocess_elapsed_seconds=$((preprocess_end - preprocess_start))"

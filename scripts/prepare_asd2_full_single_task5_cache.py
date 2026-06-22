@@ -445,6 +445,7 @@ def main() -> None:
     config = load_config(config_path)
     cache_dir = Path(args.cache_dir or config["dataset_cache_dir"]).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
+    (REPO_ROOT / "normalization_values").mkdir(parents=True, exist_ok=True)
 
     started_at = time.time()
     raw_jobs = list(iter_raw_jobs(config, cache_dir, args.splits, args.progress_every))
