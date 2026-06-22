@@ -200,7 +200,7 @@ def test_model(self,
                mfccs_test, contours_test, length_sequences, length_seq, rank, std_test, mean_test, 
                frames_test, phonemes_test, folder_run, datadir, 
                mris_test=None, std_mri=None, mean_mri=None, 
-               phonemes=None, autoencoder=None):
+               phonemes=None, autoencoder=None, skip_tract_variables=False):
     
     contour_dimension = contours_test.size(-1)
     sequences_dimension = length_seq
@@ -435,7 +435,7 @@ def test_model(self,
     has_valid_frames = concatenated_frames is not None and concatenated_frames.size and np.any(concatenated_frames)
     frames_vt = concatenated_frames[non_silent_mask] if has_valid_frames else None
 
-    if self.config.get("skip_tract_variables", False):
+    if skip_tract_variables:
         print("Skipping tract-variable metrics because skip_tract_variables=true.")
     elif self.nbr_articulators == 8 and has_valid_frames:
         concatenated_contours_vt = concatenated_contours_np[:,non_silent_mask]

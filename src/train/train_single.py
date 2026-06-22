@@ -181,7 +181,21 @@ class TrainSingle(Train):
         mean_test = batch['mean']
         length_sequences = batch['sequences_length']
         datadir = self.config['datadir']
-        return test_model(self.model, x_test, y_test, length_sequences, self.config['sequence_length'], self.gpu_id, std_test, mean_test, f_test, z_test, folder_run, datadir)
+        return test_model(
+            self.model,
+            x_test,
+            y_test,
+            length_sequences,
+            self.config['sequence_length'],
+            self.gpu_id,
+            std_test,
+            mean_test,
+            f_test,
+            z_test,
+            folder_run,
+            datadir,
+            skip_tract_variables=self.config.get("skip_tract_variables", False),
+        )
 
     
     
