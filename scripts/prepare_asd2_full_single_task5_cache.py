@@ -11,7 +11,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
 import textgrid
@@ -41,8 +41,17 @@ SPLIT_FILES = {
 class RawContourSession(Corpus_contours):
     """Use Corpus helpers while saving raw, pre-normalization session chunks."""
 
-    def __init__(self, config: Dict[str, Any], sequences: str, rank: int):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        sequences: str,
+        rank: int,
+        contour_pack_path: str | None = None,
+        rebuild_contour_pack: bool = False,
+    ):
         Corpus.__init__(self, config, sequences, rank)
+        self.contour_pack_path = Path(contour_pack_path) if contour_pack_path else None
+        self.rebuild_contour_pack = rebuild_contour_pack
 
     def read_raw(self) -> Dict[str, Any]:
         all_features = []
@@ -98,7 +107,10 @@ class RawContourSession(Corpus_contours):
                     list_phoneme_one_hot = list_phoneme_one_hot[:max_chunks]
                 print(f"Prepared {len(list_contour)} raw chunks for contour loading", flush=True)
 
-                contour_loaded = self.load_labels(contours_session, list_contour)
+                if self.contour_pack_path:
+                    contour_loaded = self.load_labels_from_npz_pack(contours_session, list_contour)
+                else:
+                    contour_loaded = self.load_labels(contours_session, list_contour)
                 frame_paths = self.load_path(contours_session, list_contour)
                 print(f"Loaded raw contours for {len(contour_loaded)} chunks", flush=True)
 
@@ -115,6 +127,112 @@ class RawContourSession(Corpus_contours):
             "phonemes": all_phonemes,
             "length_datas": sequence_lengths,
         }
+
+    def load_labels_from_npz_pack(self, image_folder: str, list_image: list) -> list:
+        frame_numbers, contours = load_or_build_contour_npz_pack(
+            image_folder=Path(image_folder),
+            list_image=list_image,
+            articulators=self.config["classes"],
+            pack_path=self.contour_pack_path,
+            rebuild=self.rebuild_contour_pack,
+        )
+        frame_to_index = {int(frame): idx for idx, frame in enumerate(frame_numbers.tolist())}
+        all_contours = []
+        num_articulators = len(self.config["classes"])
+        for image_numbers in list_image:
+            sequence = np.zeros((len(image_numbers), num_articulators, 100), dtype=np.float32)
+            for seq_idx, image_number in enumerate(image_numbers):
+                int_image_number = int(image_number)
+                if image_number == int_image_number:
+                    sequence[seq_idx] = contours[frame_to_index[int_image_number]]
+                elif isinstance(image_number, (float, np.floating)):
+                    rounded_down = int(np.floor(image_number))
+                    rounded_up = rounded_down + 1
+                    sequence[seq_idx] = (
+                        contours[frame_to_index[rounded_down]] + contours[frame_to_index[rounded_up]]
+                    ) / 2.0
+            all_contours.append(sequence)
+        return all_contours
+
+
+def required_contour_frames(list_image: list) -> List[int]:
+    frames = set()
+    for image_numbers in list_image:
+        for image_number in image_numbers:
+            int_image_number = int(image_number)
+            if image_number == int_image_number:
+                frames.add(int_image_number)
+            elif isinstance(image_number, (float, np.floating)):
+                rounded_down = int(np.floor(image_number))
+                frames.add(rounded_down)
+                frames.add(rounded_down + 1)
+    return sorted(frames)
+
+
+def atomic_npz_save(path: Path, **arrays: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("wb") as f:
+        np.savez(f, **arrays)
+    os.replace(tmp_path, path)
+
+
+def load_or_build_contour_npz_pack(
+    image_folder: Path,
+    list_image: list,
+    articulators: List[str],
+    pack_path: Path,
+    rebuild: bool,
+) -> Tuple[np.ndarray, np.ndarray]:
+    required_frames = required_contour_frames(list_image)
+    if pack_path.exists() and not rebuild:
+        with np.load(pack_path, allow_pickle=False) as pack:
+            frame_numbers = pack["frame_numbers"]
+            contours = pack["contours"]
+        available = {int(frame) for frame in frame_numbers.tolist()}
+        missing = [frame for frame in required_frames if frame not in available]
+        if not missing:
+            print(
+                f"Loaded contour npz pack {pack_path} "
+                f"with {len(frame_numbers)} frames for {len(required_frames)} requested frames",
+                flush=True,
+            )
+            return frame_numbers, contours.astype(np.float32, copy=False)
+        print(
+            f"Contour npz pack {pack_path} is missing {len(missing)} requested frames; rebuilding",
+            flush=True,
+        )
+
+    started_at = time.time()
+    contours = np.zeros((len(required_frames), len(articulators), 100), dtype=np.float32)
+    total_files = len(required_frames) * len(articulators)
+    loaded_files = 0
+    for frame_idx, frame_number in enumerate(required_frames):
+        for art_idx, articulator in enumerate(articulators):
+            contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
+            contours[frame_idx, art_idx] = np.load(contour_path).reshape(100).astype(np.float32, copy=False)
+            loaded_files += 1
+            if loaded_files == 1 or loaded_files == total_files or loaded_files % 1000 == 0:
+                elapsed = time.time() - started_at
+                print(
+                    f"Packing contour npz {pack_path}: {loaded_files}/{total_files} files "
+                    f"in {elapsed:.1f}s",
+                    flush=True,
+                )
+    frame_numbers = np.asarray(required_frames, dtype=np.int32)
+    atomic_npz_save(
+        pack_path,
+        frame_numbers=frame_numbers,
+        contours=contours,
+        articulators=np.asarray(articulators),
+        source_folder=np.asarray(str(image_folder)),
+    )
+    print(
+        f"Saved contour npz pack {pack_path} with {len(frame_numbers)} frames "
+        f"in {time.time() - started_at:.1f}s",
+        flush=True,
+    )
+    return frame_numbers, contours
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,6 +263,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-workers", type=int, default=5, help="Parallel raw-session workers.")
     parser.add_argument("--rebuild-parts", action="store_true", help="Rebuild raw session part files.")
+    parser.add_argument(
+        "--contour-pack-format",
+        choices=["none", "npz"],
+        default="npz",
+        help="Pack raw contour .npy files per session before building raw dataset parts.",
+    )
+    parser.add_argument(
+        "--rebuild-contour-packs",
+        action="store_true",
+        help="Rebuild per-session contour packs even when they already exist.",
+    )
     parser.add_argument(
         "--rebuild-assembled",
         action="store_true",
@@ -181,6 +310,8 @@ def build_raw_session(
     part_path: str,
     work_dir: str,
     progress_every: int,
+    contour_pack_path: str | None,
+    rebuild_contour_pack: bool,
 ) -> Dict[str, Any]:
     started_at = time.time()
     part_file = Path(part_path)
@@ -197,7 +328,13 @@ def build_raw_session(
     sub_config.pop("assembled_dataset_cache_dir", None)
 
     print(f"[raw {split_key}/{bucket}/{session}] start -> {part_file}", flush=True)
-    raw = RawContourSession(sub_config, split_key, rank=0).read_raw()
+    raw = RawContourSession(
+        sub_config,
+        split_key,
+        rank=0,
+        contour_pack_path=contour_pack_path,
+        rebuild_contour_pack=rebuild_contour_pack,
+    ).read_raw()
     payload = {
         "split": split_key,
         "bucket": bucket,
@@ -239,6 +376,12 @@ def iter_raw_jobs(
                     "part_path": str(cache_dir / "raw_parts" / split_key / str(bucket) / f"{session}.pt"),
                     "work_dir": str(cache_dir / "work" / "raw" / split_key / str(bucket) / str(session)),
                     "progress_every": progress_every,
+                    "contour_pack_path": (
+                        str(cache_dir / "raw_contour_npz" / str(bucket) / f"{session}.npz")
+                        if config.get("contour_pack_format", "npz") == "npz"
+                        else None
+                    ),
+                    "rebuild_contour_pack": bool(config.get("rebuild_contour_packs", False)),
                 }
 
 
@@ -443,6 +586,8 @@ def main() -> None:
     args = parse_args()
     config_path = Path(args.config).resolve()
     config = load_config(config_path)
+    config["contour_pack_format"] = args.contour_pack_format
+    config["rebuild_contour_packs"] = args.rebuild_contour_packs
     cache_dir = Path(args.cache_dir or config["dataset_cache_dir"]).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     (REPO_ROOT / "normalization_values").mkdir(parents=True, exist_ok=True)
@@ -497,6 +642,7 @@ def main() -> None:
         "context_window": config["context_window"],
         "sequence_length": config["sequence_length"],
         "output_layer": config["output_layer"],
+        "contour_pack_format": args.contour_pack_format,
         "raw_results": sorted(raw_results, key=lambda x: (x["split"], x["bucket"], x["session"])),
         "assemble_results": assemble_results,
         "validation": validation,
