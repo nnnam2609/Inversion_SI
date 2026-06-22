@@ -435,7 +435,9 @@ def test_model(self,
     has_valid_frames = concatenated_frames is not None and concatenated_frames.size and np.any(concatenated_frames)
     frames_vt = concatenated_frames[non_silent_mask] if has_valid_frames else None
 
-    if self.nbr_articulators == 8 and has_valid_frames:
+    if self.config.get("skip_tract_variables", False):
+        print("Skipping tract-variable metrics because skip_tract_variables=true.")
+    elif self.nbr_articulators == 8 and has_valid_frames:
         concatenated_contours_vt = concatenated_contours_np[:,non_silent_mask]
         concatenated_contours_pred_vt = concatenated_contours_pred_np[:,non_silent_mask]
         tract_variables(concatenated_contours_vt, concatenated_contours_pred_vt, all_phonemes, frames_vt, folder_run, datadir)

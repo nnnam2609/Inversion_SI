@@ -54,6 +54,7 @@ inference_sequences:
 input_type: mfcc
 skip_outlier_detection: true
 skip_test_plots: true
+skip_tract_variables: true
 use_mri: false
 cache_dataset: true
 rebuild_dataset_cache: false
