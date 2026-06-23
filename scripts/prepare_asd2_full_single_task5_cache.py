@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -64,6 +66,115 @@ def contour_pack_path(cache_dir: Path, config: Dict[str, Any], bucket: str, sess
     return cache_dir / "raw_contour_npz" / dataset_type / str(bucket) / f"{session}.npz"
 
 
+def make_pseudo_textgrid(duration_seconds: float) -> textgrid.TextGrid:
+    tg = textgrid.TextGrid(minTime=0.0, maxTime=duration_seconds)
+    sentence_tier = textgrid.IntervalTier(name="sentences", minTime=0.0, maxTime=duration_seconds)
+    sentence_tier.add(0.0, duration_seconds, "speech")
+    phoneme_tier = textgrid.IntervalTier(name="phones", minTime=0.0, maxTime=duration_seconds)
+    phoneme_tier.add(0.0, duration_seconds, "#")
+    tg.append(sentence_tier)
+    tg.append(phoneme_tier)
+    return tg
+
+
+def repair_textgrid_bounds_file(path: str, duration_seconds: float) -> Path:
+    source_path = Path(path)
+    text = source_path.read_text(errors="replace")
+    values = [float(match) for match in re.findall(r"(?m)^\s*x(?:min|max)\s*=\s*([0-9.]+)", text)]
+    repaired_max = max([duration_seconds, *values]) + 0.001
+    digest = hashlib.sha1(f"{source_path}:{source_path.stat().st_mtime_ns}:{repaired_max}".encode()).hexdigest()[:16]
+    output_path = REPO_ROOT / ".cache" / "repaired_textgrids" / f"{source_path.stem}_{digest}.TextGrid"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        return output_path
+
+    lines = text.splitlines()
+    repaired_lines = []
+    inside_interval = False
+    interval_xmin = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("intervals ["):
+            inside_interval = True
+            interval_xmin = None
+            repaired_lines.append(line)
+            continue
+        if inside_interval and stripped.startswith("xmin ="):
+            interval_xmin = float(stripped.split("=", 1)[1].strip())
+            repaired_lines.append(line)
+            continue
+        if stripped.startswith("xmax ="):
+            prefix = line.split("=", 1)[0] + "= "
+            value = float(stripped.split("=", 1)[1].strip())
+            if inside_interval:
+                if interval_xmin is not None and value <= interval_xmin:
+                    value = interval_xmin + 0.001
+                repaired_lines.append(f"{prefix}{value:.6f}")
+            else:
+                repaired_lines.append(f"{prefix}{repaired_max:.6f}")
+            continue
+        repaired_lines.append(line)
+        if inside_interval and stripped.startswith("text ="):
+            inside_interval = False
+            interval_xmin = None
+
+    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    tmp_path.write_text("\n".join(repaired_lines) + "\n", encoding="utf-8")
+    os.replace(tmp_path, output_path)
+    return output_path
+
+
+def load_textgrid_with_repair(path: str, duration_seconds: float, config: Dict[str, Any]) -> textgrid.TextGrid:
+    try:
+        return textgrid.TextGrid.fromFile(path)
+    except Exception as exc:
+        if config.get("repair_textgrid_bounds", False):
+            repaired_path = repair_textgrid_bounds_file(path, duration_seconds)
+            try:
+                print(
+                    f"TextGrid parse failed for {path}: {exc!r}; "
+                    f"retrying repaired bounds file {repaired_path}",
+                    flush=True,
+                )
+                return textgrid.TextGrid.fromFile(str(repaired_path))
+            except Exception as repair_exc:
+                print(
+                    f"Repaired TextGrid parse also failed for {path}: {repair_exc!r}",
+                    flush=True,
+                )
+        if config.get("pseudo_textgrid_on_parse_error", False):
+            print(
+                f"TextGrid parse failed for {path}: {exc!r}; "
+                f"using pseudo TextGrid duration={duration_seconds:.3f}s",
+                flush=True,
+            )
+            return make_pseudo_textgrid(duration_seconds)
+        raise
+
+
+def chunk_required_frames(image_numbers: Iterable[Any]) -> List[int]:
+    frames = set()
+    for image_number in image_numbers:
+        int_image_number = int(image_number)
+        if image_number == int_image_number:
+            frames.add(int_image_number)
+        elif isinstance(image_number, (float, np.floating)):
+            rounded_down = int(np.floor(image_number))
+            frames.add(rounded_down)
+            frames.add(rounded_down + 1)
+    return sorted(frames)
+
+
+def missing_contour_paths(image_folder: Path, image_numbers: Iterable[Any], articulators: List[str]) -> List[Path]:
+    missing = []
+    for frame_number in chunk_required_frames(image_numbers):
+        for articulator in articulators:
+            contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
+            if not contour_path.exists():
+                missing.append(contour_path)
+    return missing
+
+
 class RawContourSession(Corpus_contours):
     """Use Corpus helpers while saving raw, pre-normalization session chunks."""
 
@@ -115,7 +226,8 @@ class RawContourSession(Corpus_contours):
                         f"for raw session caching, got input_type={self.config['input_type']}"
                     )
 
-                tg = textgrid.TextGrid.fromFile(tg_session)
+                duration_seconds = float(len(audio_signal) / sample_rate)
+                tg = load_textgrid_with_repair(tg_session, duration_seconds, self.config)
                 index_silence = self.detect_silence(features, tg, sample_rate)
                 list_features, list_contour, _, list_phoneme_one_hot = self.detect_sentences(
                     features,
@@ -132,6 +244,40 @@ class RawContourSession(Corpus_contours):
                     list_contour = list_contour[:max_chunks]
                     list_phoneme_one_hot = list_phoneme_one_hot[:max_chunks]
                 print(f"Prepared {len(list_contour)} raw chunks for contour loading", flush=True)
+
+                if self.config.get("skip_missing_contour_chunks", False):
+                    image_folder = Path(contours_session)
+                    keep_features = []
+                    keep_contours = []
+                    keep_phonemes = []
+                    skipped_chunks = []
+                    for chunk_idx, (feature, image_numbers, phoneme) in enumerate(
+                        zip(list_features, list_contour, list_phoneme_one_hot)
+                    ):
+                        missing = missing_contour_paths(image_folder, image_numbers, self.config["classes"])
+                        if missing:
+                            skipped_chunks.append(
+                                {
+                                    "chunk_index": chunk_idx,
+                                    "missing_count": len(missing),
+                                    "first_missing": str(missing[0]),
+                                }
+                            )
+                            continue
+                        keep_features.append(feature)
+                        keep_contours.append(image_numbers)
+                        keep_phonemes.append(phoneme)
+                    if skipped_chunks:
+                        print(
+                            f"Skipped {len(skipped_chunks)}/{len(list_contour)} chunks with missing contours; "
+                            f"first_missing={skipped_chunks[0]['first_missing']}",
+                            flush=True,
+                        )
+                    list_features = keep_features
+                    list_contour = keep_contours
+                    list_phoneme_one_hot = keep_phonemes
+                    if not list_contour:
+                        raise RuntimeError("No chunks remain after filtering missing contour files")
 
                 if self.contour_pack_path:
                     contour_loaded = self.load_labels_from_npz_pack(contours_session, list_contour)
@@ -185,14 +331,7 @@ class RawContourSession(Corpus_contours):
 def required_contour_frames(list_image: list) -> List[int]:
     frames = set()
     for image_numbers in list_image:
-        for image_number in image_numbers:
-            int_image_number = int(image_number)
-            if image_number == int_image_number:
-                frames.add(int_image_number)
-            elif isinstance(image_number, (float, np.floating)):
-                rounded_down = int(np.floor(image_number))
-                frames.add(rounded_down)
-                frames.add(rounded_down + 1)
+        frames.update(chunk_required_frames(image_numbers))
     return sorted(frames)
 
 

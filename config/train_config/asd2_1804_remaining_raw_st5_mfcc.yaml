@@ -1,0 +1,73 @@
+experiment_name: experiment_asd2_1804_remaining_raw_st5_mfcc
+dataset_type: asd2
+datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+asd1_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_1_raw
+asd2_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+asd1_annotation_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/bf/inference
+phonemesdir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal/config/list_phonemes.json
+data_save: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal
+folder_save: asd2_1804_remaining_raw_st5_mfcc
+n_epochs: 1
+batch_size: 8
+learning_rate: 0.001
+weight_decay: 0.001
+optimizer: adam
+patience: 5
+save_every: 1
+num_layers: 1
+input_layer: 39
+hidden_layer: 300
+output_layer: 100
+context_window: 0
+sequence_length: 80
+added_frames: 20
+ms_image: 19.98
+n_mfcc: 13
+hop_length_ratio: 10
+window_length_ms: 25
+skip_ms: 400
+nbr_phonemes: 1
+phonemes: false
+alpha: 1
+loss_function: mse_all_articulators_full_asd2_single_task5
+mode: train
+model: single_task5_asd2_1804_remaining_raw
+tag: single_task5_asd2_1804_remaining_raw
+classes:
+- arytenoid-cartilage
+- epiglottis
+- lower-lip
+- pharynx
+- soft-palate-midline
+- tongue
+- upper-lip
+- vocal-folds
+train_sequences:
+  '1804':
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+valid_sequences: {}
+test_sequences: {}
+inference_sequences: {}
+input_type: mfcc
+phoneme_tier_index: 1
+skip_outlier_detection: true
+skip_test_plots: true
+skip_tract_variables: true
+use_mri: false
+cache_dataset: true
+rebuild_dataset_cache: false
+dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal/repro/asd1_asd2_full_raw_st5_mfcc/cache
+load_labels_progress_every: 25
+contour_file_workers: 18
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
