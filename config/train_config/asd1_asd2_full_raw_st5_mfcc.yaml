@@ -1,0 +1,377 @@
+experiment_name: experiment_asd1_asd2_full_raw_st5_mfcc
+dataset_type: mixed
+datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+asd1_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_1_raw
+asd2_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+asd1_annotation_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/bf/inference
+phonemesdir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal/config/list_phonemes.json
+data_save: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal
+folder_save: asd1_asd2_full_raw_st5_mfcc
+n_epochs: 1
+batch_size: 8
+learning_rate: 0.001
+weight_decay: 0.001
+optimizer: adam
+patience: 5
+save_every: 1
+num_layers: 1
+input_layer: 39
+hidden_layer: 300
+output_layer: 100
+context_window: 0
+sequence_length: 80
+added_frames: 20
+ms_image: 19.98
+n_mfcc: 13
+hop_length_ratio: 10
+window_length_ms: 25
+skip_ms: 400
+nbr_phonemes: 1
+phonemes: false
+alpha: 1
+loss_function: mse_all_articulators_full_asd2_single_task5
+mode: train
+model: single_task5_asd1_asd2_full_raw
+tag: single_task5_asd1_asd2_full_raw
+classes:
+- arytenoid-cartilage
+- epiglottis
+- lower-lip
+- pharynx
+- soft-palate-midline
+- tongue
+- upper-lip
+- vocal-folds
+train_sequences:
+  P1:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P2:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P3:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P4:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S13
+  - S14
+  - S15
+  P5:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P6:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P7:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P8:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P9:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P10:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  '1775':
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  - S39
+  - S40
+  - S41
+  - S42
+  - S43
+  '1777':
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  - S39
+  '1789':
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  - S39
+  - S40
+  - S41
+  - S42
+  - S43
+  - S44
+  '1791':
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  '1804':
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+valid_sequences: {}
+test_sequences: {}
+inference_sequences: {}
+input_type: mfcc
+phoneme_tier_index: 1
+skip_outlier_detection: true
+skip_test_plots: true
+skip_tract_variables: true
+use_mri: false
+cache_dataset: true
+rebuild_dataset_cache: false
+dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal/repro/asd1_asd2_full_raw_st5_mfcc/cache
+load_labels_progress_every: 25
+contour_file_workers: 18
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
