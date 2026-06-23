@@ -131,6 +131,8 @@ if __name__ == "__main__":
     if not checkpoint_path:
         create_mlflow_experiment(config)
     world_size = torch.cuda.device_count()
+    if world_size <= 0:
+        raise RuntimeError("No CUDA GPU is visible to PyTorch; run training inside an OAR GPU allocation with CUDA devices exposed.")
     mp.spawn(main, args=(world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path), nprocs=world_size)
     #dist.destroy_process_group()
     

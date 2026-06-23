@@ -26,6 +26,17 @@ def _numeric_id(value):
     return float(digits)
 
 
+def _dataset_type_for_sequence(config, sequence):
+    sequence_key = str(sequence)
+    dataset_types = config.get("dataset_types", {})
+    if sequence_key in dataset_types:
+        return str(dataset_types[sequence_key]).lower()
+    dataset_type = str(config.get("dataset_type", "asd2")).lower()
+    if dataset_type == "mixed":
+        return "asd1" if sequence_key.upper().startswith("P") else "asd2"
+    return dataset_type
+
+
 class Corpus(Dataset):
     """
     A custom dataset class for handling speech and articulatory data.
@@ -168,26 +179,30 @@ class Corpus(Dataset):
         audio_files = {}
         textgrid_files = {}
         images_files = {}
-        dataset_type = self.config.get("dataset_type", "asd2").lower()
-        
+
         for sequence, sessions in tqdm(self.config[self.sequences].items(), desc=f"Reading {self.sequences}"):
             audio_files[sequence] = []
             textgrid_files[sequence] = []
             images_files[sequence] = []
             for session in sessions:
+                dataset_type = _dataset_type_for_sequence(self.config, sequence)
                 if dataset_type == "asd1":
                     audio_file, textgrid_file, image_folder = self._resolve_asd1_session(sequence, session)
                 elif dataset_type == "asd2":
                     audio_file, textgrid_file, image_folder = self._resolve_asd2_session(sequence, session)
                 else:
-                    raise ValueError(f"Unsupported dataset_type={dataset_type!r}; expected 'asd1' or 'asd2'")
+                    raise ValueError(
+                        f"Unsupported dataset_type={dataset_type!r} for sequence={sequence!r}; "
+                        "expected 'asd1', 'asd2', or global 'mixed'"
+                    )
                 audio_files[sequence].append(audio_file)
                 textgrid_files[sequence].append(textgrid_file)
                 images_files[sequence].append(image_folder)
         return audio_files, textgrid_files, images_files
 
     def _resolve_asd2_session(self, sequence: str, session: str) -> tuple:
-        audio_folder = os.path.join(self.config['datadir'], sequence, session)
+        datadir = self.config.get("asd2_datadir", self.config["datadir"])
+        audio_folder = os.path.join(datadir, sequence, session)
         if not os.path.isdir(audio_folder):
             raise FileNotFoundError(f"Missing ASD2 session folder: {audio_folder}")
         contour_candidates = [
@@ -216,8 +231,9 @@ class Corpus(Dataset):
 
     def _resolve_asd1_session(self, sequence: str, session: str) -> tuple:
         speaker = str(sequence)
-        other_folder = os.path.join(self.config['datadir'], speaker, "OTHER", session)
-        dcm_folder = os.path.join(self.config['datadir'], speaker, "DCM_2D", session)
+        datadir = self.config.get("asd1_datadir", self.config["datadir"])
+        other_folder = os.path.join(datadir, speaker, "OTHER", session)
+        dcm_folder = os.path.join(datadir, speaker, "DCM_2D", session)
         if not os.path.isdir(other_folder):
             raise FileNotFoundError(f"Missing ASD1 OTHER session folder: {other_folder}")
         if not os.path.isdir(dcm_folder):

@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -36,6 +36,32 @@ SPLIT_FILES = {
     "valid_sequences": "valid_sequences.pt",
     "test_sequences": "test_sequences.pt",
 }
+
+
+def dataset_type_for_sequence(config: Dict[str, Any], sequence: str) -> str:
+    sequence_key = str(sequence)
+    dataset_types = config.get("dataset_types", {})
+    if sequence_key in dataset_types:
+        return str(dataset_types[sequence_key]).lower()
+    dataset_type = str(config.get("dataset_type", "asd2")).lower()
+    if dataset_type == "mixed":
+        return "asd1" if sequence_key.upper().startswith("P") else "asd2"
+    return dataset_type
+
+
+def raw_session_part_path(cache_dir: Path, config: Dict[str, Any], bucket: str, session: str) -> Path:
+    dataset_type = dataset_type_for_sequence(config, bucket)
+    return cache_dir / "raw_sessions" / dataset_type / str(bucket) / f"{session}.pt"
+
+
+def raw_session_work_dir(cache_dir: Path, config: Dict[str, Any], bucket: str, session: str) -> Path:
+    dataset_type = dataset_type_for_sequence(config, bucket)
+    return cache_dir / "work" / "raw_sessions" / dataset_type / str(bucket) / str(session)
+
+
+def contour_pack_path(cache_dir: Path, config: Dict[str, Any], bucket: str, session: str) -> Path:
+    dataset_type = dataset_type_for_sequence(config, bucket)
+    return cache_dir / "raw_contour_npz" / dataset_type / str(bucket) / f"{session}.npz"
 
 
 class RawContourSession(Corpus_contours):
@@ -135,6 +161,7 @@ class RawContourSession(Corpus_contours):
             articulators=self.config["classes"],
             pack_path=self.contour_pack_path,
             rebuild=self.rebuild_contour_pack,
+            file_workers=int(self.config.get("contour_file_workers", 1)),
         )
         frame_to_index = {int(frame): idx for idx, frame in enumerate(frame_numbers.tolist())}
         all_contours = []
@@ -183,6 +210,7 @@ def load_or_build_contour_npz_pack(
     articulators: List[str],
     pack_path: Path,
     rebuild: bool,
+    file_workers: int = 1,
 ) -> Tuple[np.ndarray, np.ndarray]:
     required_frames = required_contour_frames(list_image)
     if pack_path.exists() and not rebuild:
@@ -207,10 +235,30 @@ def load_or_build_contour_npz_pack(
     contours = np.zeros((len(required_frames), len(articulators), 100), dtype=np.float32)
     total_files = len(required_frames) * len(articulators)
     loaded_files = 0
-    for frame_idx, frame_number in enumerate(required_frames):
-        for art_idx, articulator in enumerate(articulators):
-            contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
-            contours[frame_idx, art_idx] = np.load(contour_path).reshape(100).astype(np.float32, copy=False)
+
+    def load_one(item: Tuple[int, int, int, str]) -> Tuple[int, int, np.ndarray]:
+        frame_idx, frame_number, art_idx, articulator = item
+        contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
+        contour = np.load(contour_path).reshape(100).astype(np.float32, copy=False)
+        return frame_idx, art_idx, contour
+
+    load_items = [
+        (frame_idx, frame_number, art_idx, articulator)
+        for frame_idx, frame_number in enumerate(required_frames)
+        for art_idx, articulator in enumerate(articulators)
+    ]
+
+    workers = max(1, int(file_workers))
+    if workers == 1:
+        loaded_iter = map(load_one, load_items)
+    else:
+        print(f"Using contour_file_workers={workers} for {pack_path}", flush=True)
+        executor = ThreadPoolExecutor(max_workers=workers)
+        loaded_iter = executor.map(load_one, load_items)
+
+    try:
+        for frame_idx, art_idx, contour in loaded_iter:
+            contours[frame_idx, art_idx] = contour
             loaded_files += 1
             if loaded_files == 1 or loaded_files == total_files or loaded_files % 1000 == 0:
                 elapsed = time.time() - started_at
@@ -219,6 +267,9 @@ def load_or_build_contour_npz_pack(
                     f"in {elapsed:.1f}s",
                     flush=True,
                 )
+    finally:
+        if workers != 1:
+            executor.shutdown(wait=True)
     frame_numbers = np.asarray(required_frames, dtype=np.int32)
     atomic_npz_save(
         pack_path,
@@ -280,6 +331,21 @@ def parse_args() -> argparse.Namespace:
         help="Overwrite bucket and final split cache files even if they already exist.",
     )
     parser.add_argument(
+        "--raw-only",
+        action="store_true",
+        help="Build/resume only reusable per-session raw caches and skip final split assembly.",
+    )
+    parser.add_argument(
+        "--skip-failed-sessions",
+        action="store_true",
+        help="Continue preprocessing when a session fails; missing sessions are skipped during assembly.",
+    )
+    parser.add_argument(
+        "--failed-sessions-path",
+        default=None,
+        help="JSON path for failed/skipped sessions. Defaults to <cache-dir>/failed_sessions.json.",
+    )
+    parser.add_argument(
         "--progress-every",
         type=int,
         default=25,
@@ -337,6 +403,7 @@ def build_raw_session(
     ).read_raw()
     payload = {
         "split": split_key,
+        "dataset_type": dataset_type_for_sequence(config, bucket),
         "bucket": bucket,
         "session": session,
         "raw": raw,
@@ -351,6 +418,7 @@ def build_raw_session(
     )
     return {
         "split": split_key,
+        "dataset_type": dataset_type_for_sequence(config, bucket),
         "bucket": bucket,
         "session": session,
         "path": str(part_file),
@@ -365,19 +433,25 @@ def iter_raw_jobs(
     splits: Iterable[str],
     progress_every: int,
 ) -> Iterable[Dict[str, Any]]:
+    emitted = set()
     for split_key in splits:
         for bucket, sessions in config[split_key].items():
             for session in sessions:
+                dataset_type = dataset_type_for_sequence(config, str(bucket))
+                cache_key = (dataset_type, str(bucket), str(session))
+                if cache_key in emitted:
+                    continue
+                emitted.add(cache_key)
                 yield {
                     "config": config,
                     "split_key": split_key,
                     "bucket": str(bucket),
                     "session": str(session),
-                    "part_path": str(cache_dir / "raw_parts" / split_key / str(bucket) / f"{session}.pt"),
-                    "work_dir": str(cache_dir / "work" / "raw" / split_key / str(bucket) / str(session)),
+                    "part_path": str(raw_session_part_path(cache_dir, config, str(bucket), str(session))),
+                    "work_dir": str(raw_session_work_dir(cache_dir, config, str(bucket), str(session))),
                     "progress_every": progress_every,
                     "contour_pack_path": (
-                        str(cache_dir / "raw_contour_npz" / str(bucket) / f"{session}.npz")
+                        str(contour_pack_path(cache_dir, config, str(bucket), str(session)))
                         if config.get("contour_pack_format", "npz") == "npz"
                         else None
                     ),
@@ -404,7 +478,7 @@ def assemble_bucket(config: Dict[str, Any], cache_dir: Path, split_key: str, buc
     phonemes = []
     length_datas = []
     for session in config[split_key][bucket]:
-        raw_path = cache_dir / "raw_parts" / split_key / str(bucket) / f"{session}.pt"
+        raw_path = raw_session_part_path(cache_dir, config, str(bucket), str(session))
         if not raw_path.exists():
             raise FileNotFoundError(f"Missing raw session cache: {raw_path}")
         raw = torch.load(raw_path, map_location="cpu")["raw"]
@@ -519,6 +593,40 @@ def pad_time_dim(tensor: torch.Tensor, target_length: int, dim: int = 1) -> torc
     return torch.cat([tensor, padding], dim=dim)
 
 
+def filter_config_to_available_raw_sessions(
+    config: Dict[str, Any],
+    cache_dir: Path,
+    splits: Iterable[str],
+    skip_missing: bool,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    filtered = copy.deepcopy(config)
+    skipped = []
+    for split_key in splits:
+        filtered_split = {}
+        for bucket, sessions in config[split_key].items():
+            kept_sessions = []
+            for session in sessions:
+                raw_path = raw_session_part_path(cache_dir, config, str(bucket), str(session))
+                if raw_path.exists():
+                    kept_sessions.append(session)
+                    continue
+                skipped_item = {
+                    "split": split_key,
+                    "dataset_type": dataset_type_for_sequence(config, str(bucket)),
+                    "bucket": str(bucket),
+                    "session": str(session),
+                    "path": str(raw_path),
+                    "reason": "missing_raw_session_cache",
+                }
+                if not skip_missing:
+                    raise FileNotFoundError(f"Missing raw session cache: {raw_path}")
+                skipped.append(skipped_item)
+            if kept_sessions:
+                filtered_split[bucket] = kept_sessions
+        filtered[split_key] = filtered_split
+    return filtered, skipped
+
+
 def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebuild: bool) -> Dict[str, Any]:
     output_path = cache_dir / SPLIT_FILES[split_key]
     if output_path.exists() and not rebuild:
@@ -531,6 +639,8 @@ def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebu
             "feature_shape": list(state["features"].shape),
             "label_shape": list(state["labels"].shape),
         }
+    if not config.get(split_key):
+        raise ValueError(f"No available sessions to assemble for split {split_key}")
 
     states = [
         assemble_bucket(config, cache_dir, split_key, str(bucket), rebuild)
@@ -610,6 +720,7 @@ def main() -> None:
     cache_dir = Path(args.cache_dir or config["dataset_cache_dir"]).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     (REPO_ROOT / "normalization_values").mkdir(parents=True, exist_ok=True)
+    failed_sessions_path = Path(args.failed_sessions_path or cache_dir / "failed_sessions.json").resolve()
 
     started_at = time.time()
     raw_jobs = list(iter_raw_jobs(config, cache_dir, args.splits, args.progress_every))
@@ -624,6 +735,7 @@ def main() -> None:
     print(f"raw_session_jobs={len(raw_jobs)} to_build={len(to_build)}", flush=True)
 
     raw_results = []
+    failed_sessions = []
     if to_build:
         workers = max(1, min(args.max_workers, len(to_build)))
         print(f"building raw session parts with max_workers={workers}", flush=True)
@@ -637,24 +749,68 @@ def main() -> None:
                 try:
                     raw_results.append(future.result())
                 except Exception as exc:
+                    failure = {
+                        "split": job["split_key"],
+                        "dataset_type": dataset_type_for_sequence(config, job["bucket"]),
+                        "bucket": job["bucket"],
+                        "session": job["session"],
+                        "part_path": job["part_path"],
+                        "error": repr(exc),
+                    }
+                    failed_sessions.append(failure)
                     print(
                         f"[raw {job['split_key']}/{job['bucket']}/{job['session']}] failed: {exc}",
                         file=sys.stderr,
                         flush=True,
                     )
-                    raise
+                    if not args.skip_failed_sessions:
+                        write_metadata(
+                            failed_sessions_path,
+                            {
+                                "config": str(config_path),
+                                "cache_dir": str(cache_dir),
+                                "failed_sessions": failed_sessions,
+                                "elapsed_seconds": time.time() - started_at,
+                            },
+                        )
+                        raise
     else:
         print("all raw session caches already exist", flush=True)
 
-    assemble_results = [
-        assemble_split(config, cache_dir, split_key, args.rebuild_assembled)
-        for split_key in args.splits
-    ]
-    validation = validate_cache(config, cache_dir, args.splits)
+    available_config, skipped_missing = filter_config_to_available_raw_sessions(
+        config,
+        cache_dir,
+        args.splits,
+        skip_missing=args.skip_failed_sessions,
+    )
+    all_skipped = failed_sessions + skipped_missing
+    if all_skipped:
+        write_metadata(
+            failed_sessions_path,
+            {
+                "config": str(config_path),
+                "cache_dir": str(cache_dir),
+                "failed_or_skipped_sessions": all_skipped,
+                "elapsed_seconds": time.time() - started_at,
+            },
+        )
+        print(f"wrote failed/skipped session report: {failed_sessions_path}", flush=True)
+
+    assemble_results = []
+    validation = {}
+    if args.raw_only:
+        print("raw_only=true; skipping bucket/final split assembly", flush=True)
+    else:
+        assemble_results = [
+            assemble_split(available_config, cache_dir, split_key, args.rebuild_assembled)
+            for split_key in args.splits
+        ]
+        validation = validate_cache(available_config, cache_dir, args.splits)
     metadata = {
         "config": str(config_path),
         "cache_dir": str(cache_dir),
         "splits": args.splits,
+        "raw_session_cache_layout": "raw_sessions/<dataset_type>/<bucket>/<session>.pt",
         "classes": config["classes"],
         "input_type": config["input_type"],
         "input_layer": config["input_layer"],
@@ -662,7 +818,9 @@ def main() -> None:
         "sequence_length": config["sequence_length"],
         "output_layer": config["output_layer"],
         "contour_pack_format": args.contour_pack_format,
+        "raw_only": args.raw_only,
         "raw_results": sorted(raw_results, key=lambda x: (x["split"], x["bucket"], x["session"])),
+        "failed_or_skipped_sessions": all_skipped,
         "assemble_results": assemble_results,
         "validation": validation,
         "elapsed_seconds": time.time() - started_at,

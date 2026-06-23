@@ -126,6 +126,20 @@ def _load_or_build_contour_dataset(config, split_key, rank, world_size):
     print(f"Loading dataset cache for {split_key}: {cache_path}", flush=True)
     return CachedContourDataset(torch.load(cache_path, map_location='cpu'))
 
+
+def _dataloader_kwargs(config):
+    num_workers = int(config.get('num_workers', 0))
+    kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': bool(config.get('pin_memory', False)),
+    }
+    if num_workers > 0:
+        kwargs['persistent_workers'] = bool(config.get('persistent_workers', False))
+        if 'prefetch_factor' in config:
+            kwargs['prefetch_factor'] = int(config['prefetch_factor'])
+    return kwargs
+
+
 def read_dataset_train(config: dict, world_size: int, rank: int):
     """
     Reads and prepares the dataset for training, validation, and testing in a distributed setup.
@@ -158,16 +172,35 @@ def read_dataset_train(config: dict, world_size: int, rank: int):
     
     train_dataset = _load_or_build_contour_dataset(config, train_sequences, rank, world_size)
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=False, sampler=train_sampler)
+    loader_kwargs = _dataloader_kwargs(config)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=config['batch_size'],
+        shuffle=False,
+        sampler=train_sampler,
+        **loader_kwargs,
+    )
     
     
     validation_dataset = _load_or_build_contour_dataset(config, valid_sequences, rank, world_size)
     validation_sampler = DistributedSampler(validation_dataset, num_replicas=world_size, rank=rank)
-    validation_dataloader = DataLoader(validation_dataset, batch_size=config['batch_size'], shuffle=False, sampler=validation_sampler)
+    validation_dataloader = DataLoader(
+        validation_dataset,
+        batch_size=config['batch_size'],
+        shuffle=False,
+        sampler=validation_sampler,
+        **loader_kwargs,
+    )
     
     test_dataset = _load_or_build_contour_dataset(config, test_sequences, rank, world_size)
     batch_test = len(test_dataset)
     test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_test, shuffle=False, sampler=test_sampler)
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=batch_test,
+        shuffle=False,
+        sampler=test_sampler,
+        **loader_kwargs,
+    )
     
     return train_dataloader, validation_dataloader, test_dataloader
