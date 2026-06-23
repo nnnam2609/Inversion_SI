@@ -67,6 +67,9 @@ rebuild_dataset_cache: false
 dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/inversion_single_task5_minimal/repro/asd1_asd2_full_raw_st5_mfcc/cache
 load_labels_progress_every: 25
 contour_file_workers: 18
+repair_textgrid_bounds: true
+pseudo_textgrid_on_parse_error: true
+skip_missing_contour_chunks: true
 num_workers: 4
 pin_memory: true
 persistent_workers: true

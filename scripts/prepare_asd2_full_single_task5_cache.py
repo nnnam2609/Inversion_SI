@@ -165,12 +165,40 @@ def chunk_required_frames(image_numbers: Iterable[Any]) -> List[int]:
     return sorted(frames)
 
 
-def missing_contour_paths(image_folder: Path, image_numbers: Iterable[Any], articulators: List[str]) -> List[Path]:
+def build_contour_availability(image_folder: Path, articulators: List[str]) -> set[Tuple[int, str]]:
+    articulator_set = set(articulators)
+    available = set()
+    with os.scandir(image_folder) as entries:
+        for entry in entries:
+            if not entry.name.endswith(".npy") or "_" not in entry.name:
+                continue
+            frame_text, articulator_ext = entry.name.split("_", 1)
+            articulator = articulator_ext[:-4]
+            if articulator not in articulator_set:
+                continue
+            try:
+                frame_number = int(frame_text)
+            except ValueError:
+                continue
+            available.add((frame_number, articulator))
+    return available
+
+
+def missing_contour_paths(
+    image_folder: Path,
+    image_numbers: Iterable[Any],
+    articulators: List[str],
+    available: set[Tuple[int, str]] | None = None,
+) -> List[Path]:
     missing = []
     for frame_number in chunk_required_frames(image_numbers):
         for articulator in articulators:
             contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
-            if not contour_path.exists():
+            if available is not None:
+                is_missing = (frame_number, articulator) not in available
+            else:
+                is_missing = not contour_path.exists()
+            if is_missing:
                 missing.append(contour_path)
     return missing
 
@@ -247,6 +275,11 @@ class RawContourSession(Corpus_contours):
 
                 if self.config.get("skip_missing_contour_chunks", False):
                     image_folder = Path(contours_session)
+                    available_contours = build_contour_availability(image_folder, self.config["classes"])
+                    print(
+                        f"Indexed {len(available_contours)} contour files for missing-chunk filtering",
+                        flush=True,
+                    )
                     keep_features = []
                     keep_contours = []
                     keep_phonemes = []
@@ -254,7 +287,12 @@ class RawContourSession(Corpus_contours):
                     for chunk_idx, (feature, image_numbers, phoneme) in enumerate(
                         zip(list_features, list_contour, list_phoneme_one_hot)
                     ):
-                        missing = missing_contour_paths(image_folder, image_numbers, self.config["classes"])
+                        missing = missing_contour_paths(
+                            image_folder,
+                            image_numbers,
+                            self.config["classes"],
+                            available=available_contours,
+                        )
                         if missing:
                             skipped_chunks.append(
                                 {
