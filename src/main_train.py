@@ -119,6 +119,7 @@ def main(rank: int, world_size: int, config:dict, model_type: str, phonemes_arg:
                 params['run_id'] = mlflow.active_run().info.run_id
                 config['run_id'] = params['run_id']
                 mlflow.log_params(params)
+                mlflow.log_dict(config, "config.yaml")
                 mlflow.log_dict(required_data, "datasets.txt")
                 trainer.train(mlflow)
                 mlflow.end_run()

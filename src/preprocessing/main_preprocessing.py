@@ -37,6 +37,20 @@ def _dataset_type_for_sequence(config, sequence):
     return dataset_type
 
 
+def _canonicalize_contour_array(contour):
+    """Return flat interleaved x/y contour coordinates: [x1, y1, x2, y2, ...]."""
+    contour = np.asarray(contour)
+    if contour.shape == (50, 2):
+        canonical = contour
+    elif contour.shape == (2, 50):
+        canonical = contour.T
+    elif contour.size == 100:
+        canonical = contour.reshape(50, 2)
+    else:
+        raise ValueError(f"Unexpected contour shape {contour.shape}")
+    return canonical.reshape(100)
+
+
 class Corpus(Dataset):
     """
     A custom dataset class for handling speech and articulatory data.
@@ -996,7 +1010,7 @@ class Corpus(Dataset):
             image_filename = f"{frame_number:04d}_{articulator}.npy"
             image_path = os.path.join(image_folder, image_filename)
             if image_path not in contour_file_cache:
-                contour_file_cache[image_path] = np.load(image_path).reshape(100)
+                contour_file_cache[image_path] = _canonicalize_contour_array(np.load(image_path))
             return contour_file_cache[image_path]
 
         total_chunks = len(list_image)

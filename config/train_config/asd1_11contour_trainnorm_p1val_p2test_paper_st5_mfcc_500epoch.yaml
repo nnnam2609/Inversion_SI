@@ -1,0 +1,244 @@
+experiment_name: experiment_asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch
+dataset_type: asd1
+datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_1_raw
+asd1_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_1_raw
+asd1_annotation_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/bf/inference
+phonemesdir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/config/list_phonemes.json
+data_save: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI
+folder_save: asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch
+n_epochs: 500
+batch_size: 10
+learning_rate: 0.001
+weight_decay: 0.001
+optimizer: adam
+patience: 10
+save_every: 10
+num_layers: 1
+input_layer: 39
+hidden_layer: 300
+output_layer: 100
+context_window: 0
+sequence_length: 80
+added_frames: 20
+ms_image: 19.98
+n_mfcc: 13
+hop_length_ratio: 10
+window_length_ms: 25
+skip_ms: 400
+nbr_phonemes: 1
+phonemes: false
+alpha: 1
+loss_function: mse_all_articulators_full_asd1_single_task5
+mode: train
+model: single_task5_asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch
+tag: paper_style_st5_mfcc_asd1_11contour_trainnorm_p1val_p2test_500epoch_no_leak
+seed: 42
+classes:
+- arytenoid-cartilage
+- epiglottis
+- lower-lip
+- pharynx
+- soft-palate-midline
+- tongue
+- upper-lip
+- vocal-folds
+- thyroid-cartilage
+- lower-incisor
+- upper-incisor
+train_sequences:
+  P3:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P4:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S13
+  - S14
+  - S15
+  P5:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P6:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P7:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P8:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P9:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  P10:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+valid_sequences:
+  P1:
+  - S1
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+test_sequences:
+  P2:
+  - S1
+  - S2
+  - S3
+  - S4
+  - S5
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+inference_sequences:
+  P2:
+  - S1
+input_type: mfcc
+phoneme_tier_index: 1
+skip_outlier_detection: true
+skip_test_plots: true
+skip_tract_variables: true
+use_mri: false
+cache_dataset: true
+rebuild_dataset_cache: false
+session_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/cache
+split_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch/splits
+dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch/splits
+speaker_independent: true
+skip_bad_session_cache: true
+load_labels_progress_every: 25
+contour_file_workers: 8
+repair_textgrid_bounds: true
+pseudo_textgrid_on_parse_error: true
+skip_missing_contour_chunks: true
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
+normalization_mode: train_global
+normalization_fit_split: train_sequences

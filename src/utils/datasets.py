@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data import DataLoader, DistributedSampler
+from train.split_cache import ensure_split_caches, split_cache_path
 
 
 class CachedContourDataset(Dataset):
@@ -99,6 +100,19 @@ def _load_assembled_cache_dataset(config, split_key):
 def _load_or_build_contour_dataset(config, split_key, rank, world_size):
     if config.get('assembled_dataset_cache_dir'):
         return _load_assembled_cache_dataset(config, split_key)
+
+    if config.get('session_cache_dir') and config.get('split_cache_dir'):
+        if not config.get('_split_cache_ready', False):
+            if rank == 0:
+                ensure_split_caches(config)
+            if world_size > 1 and dist.is_initialized():
+                dist.barrier()
+            config['_split_cache_ready'] = True
+        cache_path = split_cache_path(config, split_key)
+        if not cache_path.exists():
+            raise FileNotFoundError(f"Split cache was not created: {cache_path}")
+        print(f"Loading split cache for {split_key}: {cache_path}", flush=True)
+        return CachedContourDataset(torch.load(cache_path, map_location='cpu'))
 
     if not config.get('cache_dataset', False):
         return Corpus_contours(config, split_key, rank)

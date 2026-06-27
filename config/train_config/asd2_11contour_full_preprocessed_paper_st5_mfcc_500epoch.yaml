@@ -1,0 +1,226 @@
+experiment_name: experiment_asd2_11contour_full_preprocessed_paper_st5_mfcc_500epoch
+dataset_type: asd2
+datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+asd2_datadir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2
+phonemesdir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/config/list_phonemes.json
+data_save: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI
+folder_save: asd2_11contour_full_preprocessed_paper_st5_mfcc_500epoch
+n_epochs: 500
+batch_size: 10
+learning_rate: 0.001
+weight_decay: 0.001
+optimizer: adam
+patience: 10
+save_every: 10
+num_layers: 1
+input_layer: 39
+hidden_layer: 300
+output_layer: 100
+context_window: 0
+sequence_length: 80
+added_frames: 20
+ms_image: 19.98
+n_mfcc: 13
+hop_length_ratio: 10
+window_length_ms: 25
+skip_ms: 400
+nbr_phonemes: 1
+phonemes: false
+alpha: 1
+loss_function: mse_all_articulators_full_asd2_single_task5
+mode: train
+model: single_task5_asd2_11contour_full_preprocessed_paper_st5_mfcc_500epoch
+tag: paper_style_st5_mfcc_asd2_11contour_preprocessed_500epoch
+seed: 42
+classes:
+- arytenoid-cartilage
+- epiglottis
+- lower-lip
+- pharynx
+- soft-palate-midline
+- tongue
+- upper-lip
+- vocal-folds
+- thyroid-cartilage
+- lower-incisor
+- upper-incisor
+train_sequences:
+  '1775':
+  - S6
+  - S7
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  '1777':
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  '1789':
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  '1791':
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+  - S15
+  - S16
+  - S17
+  - S18
+  - S19
+  - S20
+  - S21
+  - S22
+  - S23
+  - S24
+  - S25
+  - S26
+  '1804':
+  - S8
+  - S9
+  - S10
+  - S11
+  - S12
+  - S13
+  - S14
+valid_sequences:
+  '1775':
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  '1777':
+  - S29
+  - S30
+  - S31
+  - S32
+  - S33
+  '1789':
+  - S32
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  '1791':
+  - S27
+  - S28
+  - S29
+  - S30
+  - S31
+  - S32
+  '1804':
+  - S16
+test_sequences:
+  '1775':
+  - S37
+  - S38
+  - S39
+  - S40
+  - S41
+  - S42
+  - S43
+  '1777':
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  - S39
+  '1789':
+  - S39
+  - S40
+  - S41
+  - S42
+  - S43
+  - S44
+  '1791':
+  - S33
+  - S34
+  - S35
+  - S36
+  - S37
+  - S38
+  '1804':
+  - S17
+  - S19
+inference_sequences:
+  '1775':
+  - S37
+input_type: mfcc
+skip_outlier_detection: true
+skip_test_plots: true
+skip_tract_variables: true
+use_mri: false
+cache_dataset: true
+rebuild_dataset_cache: false
+session_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/cache
+split_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_full_raw_st5_mfcc/splits
+dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_full_raw_st5_mfcc/splits
+speaker_independent: false
+skip_bad_session_cache: true
+load_labels_progress_every: 25
+contour_file_workers: 16
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
+asd2_contour_overlay_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_full_raw_st5_mfcc/contour_overlay/asd2
+skip_missing_contour_chunks: true

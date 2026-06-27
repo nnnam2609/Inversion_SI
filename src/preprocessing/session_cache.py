@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare exact ASD2 full-split dataset cache for single-task-5 training."""
+"""Build reusable per-session preprocessing caches for single-task-5."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import yaml
 from torch.nn.utils.rnn import pad_sequence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault("MPLCONFIGDIR", str(REPO_ROOT / ".cache" / "matplotlib"))
 (REPO_ROOT / ".cache" / "matplotlib").mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(REPO_ROOT))
@@ -38,6 +38,10 @@ SPLIT_FILES = {
     "valid_sequences": "valid_sequences.pt",
     "test_sequences": "test_sequences.pt",
 }
+
+
+def normalization_mode(config: Dict[str, Any]) -> str:
+    return str(config.get("normalization_mode", "bucket")).lower()
 
 
 def dataset_type_for_sequence(config: Dict[str, Any], sequence: str) -> str:
@@ -64,6 +68,29 @@ def raw_session_work_dir(cache_dir: Path, config: Dict[str, Any], bucket: str, s
 def contour_pack_path(cache_dir: Path, config: Dict[str, Any], bucket: str, session: str) -> Path:
     dataset_type = dataset_type_for_sequence(config, bucket)
     return cache_dir / "raw_contour_npz" / dataset_type / str(bucket) / f"{session}.npz"
+
+
+def contour_overlay_folder(config: Dict[str, Any], image_folder: Path) -> Path | None:
+    root_value = config.get("asd2_contour_overlay_dir") or config.get("contour_overlay_dir")
+    if not root_value:
+        return None
+    session_dir = image_folder.parent
+    bucket = session_dir.parent.name
+    session = session_dir.name
+    overlay = Path(root_value) / str(bucket) / str(session) / image_folder.name
+    return overlay if overlay.is_dir() else None
+
+
+def resolve_contour_path(image_folder: Path, frame_number: int, articulator: str, overlay_folder: Path | None = None) -> Path:
+    filename = f"{frame_number:04d}_{articulator}.npy"
+    primary_path = image_folder / filename
+    if primary_path.exists():
+        return primary_path
+    if overlay_folder is not None:
+        overlay_path = overlay_folder / filename
+        if overlay_path.exists():
+            return overlay_path
+    return primary_path
 
 
 def make_pseudo_textgrid(duration_seconds: float) -> textgrid.TextGrid:
@@ -165,22 +192,32 @@ def chunk_required_frames(image_numbers: Iterable[Any]) -> List[int]:
     return sorted(frames)
 
 
-def build_contour_availability(image_folder: Path, articulators: List[str]) -> set[Tuple[int, str]]:
+def build_contour_availability(
+    image_folder: Path,
+    articulators: List[str],
+    overlay_folder: Path | None = None,
+) -> set[Tuple[int, str]]:
     articulator_set = set(articulators)
     available = set()
-    with os.scandir(image_folder) as entries:
-        for entry in entries:
-            if not entry.name.endswith(".npy") or "_" not in entry.name:
-                continue
-            frame_text, articulator_ext = entry.name.split("_", 1)
-            articulator = articulator_ext[:-4]
-            if articulator not in articulator_set:
-                continue
-            try:
-                frame_number = int(frame_text)
-            except ValueError:
-                continue
-            available.add((frame_number, articulator))
+
+    def scan(folder: Path) -> None:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".npy") or "_" not in entry.name:
+                    continue
+                frame_text, articulator_ext = entry.name.split("_", 1)
+                articulator = articulator_ext[:-4]
+                if articulator not in articulator_set:
+                    continue
+                try:
+                    frame_number = int(frame_text)
+                except ValueError:
+                    continue
+                available.add((frame_number, articulator))
+
+    scan(image_folder)
+    if overlay_folder is not None:
+        scan(overlay_folder)
     return available
 
 
@@ -189,6 +226,7 @@ def missing_contour_paths(
     image_numbers: Iterable[Any],
     articulators: List[str],
     available: set[Tuple[int, str]] | None = None,
+    overlay_folder: Path | None = None,
 ) -> List[Path]:
     missing = []
     for frame_number in chunk_required_frames(image_numbers):
@@ -197,6 +235,7 @@ def missing_contour_paths(
             if available is not None:
                 is_missing = (frame_number, articulator) not in available
             else:
+                contour_path = resolve_contour_path(image_folder, frame_number, articulator, overlay_folder)
                 is_missing = not contour_path.exists()
             if is_missing:
                 missing.append(contour_path)
@@ -250,7 +289,7 @@ class RawContourSession(Corpus_contours):
                     )
                 else:
                     raise ValueError(
-                        "prepare_asd2_full_single_task5_cache.py only supports mfcc/cepstre "
+                        "session_cache only supports mfcc/cepstre "
                         f"for raw session caching, got input_type={self.config['input_type']}"
                     )
 
@@ -275,7 +314,14 @@ class RawContourSession(Corpus_contours):
 
                 if self.config.get("skip_missing_contour_chunks", False):
                     image_folder = Path(contours_session)
-                    available_contours = build_contour_availability(image_folder, self.config["classes"])
+                    overlay_folder = contour_overlay_folder(self.config, image_folder)
+                    if overlay_folder is not None:
+                        print(f"Using contour overlay {overlay_folder}", flush=True)
+                    available_contours = build_contour_availability(
+                        image_folder,
+                        self.config["classes"],
+                        overlay_folder=overlay_folder,
+                    )
                     print(
                         f"Indexed {len(available_contours)} contour files for missing-chunk filtering",
                         flush=True,
@@ -292,6 +338,7 @@ class RawContourSession(Corpus_contours):
                             image_numbers,
                             self.config["classes"],
                             available=available_contours,
+                            overlay_folder=overlay_folder,
                         )
                         if missing:
                             skipped_chunks.append(
@@ -339,13 +386,15 @@ class RawContourSession(Corpus_contours):
         }
 
     def load_labels_from_npz_pack(self, image_folder: str, list_image: list) -> list:
+        image_folder_path = Path(image_folder)
         frame_numbers, contours = load_or_build_contour_npz_pack(
-            image_folder=Path(image_folder),
+            image_folder=image_folder_path,
             list_image=list_image,
             articulators=self.config["classes"],
             pack_path=self.contour_pack_path,
             rebuild=self.rebuild_contour_pack,
             file_workers=int(self.config.get("contour_file_workers", 1)),
+            overlay_folder=contour_overlay_folder(self.config, image_folder_path),
         )
         frame_to_index = {int(frame): idx for idx, frame in enumerate(frame_numbers.tolist())}
         all_contours = []
@@ -373,6 +422,21 @@ def required_contour_frames(list_image: list) -> List[int]:
     return sorted(frames)
 
 
+def canonicalize_contour(contour: np.ndarray, path: Path | None = None) -> np.ndarray:
+    """Return flat interleaved x/y contour coordinates: [x1, y1, x2, y2, ...]."""
+    contour = np.asarray(contour)
+    if contour.shape == (50, 2):
+        canonical = contour
+    elif contour.shape == (2, 50):
+        canonical = contour.T
+    elif contour.size == 100:
+        canonical = contour.reshape(50, 2)
+    else:
+        location = f" from {path}" if path is not None else ""
+        raise ValueError(f"Unexpected contour shape {contour.shape}{location}")
+    return canonical.reshape(100).astype(np.float32, copy=False)
+
+
 def atomic_npz_save(path: Path, **arrays: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -388,6 +452,7 @@ def load_or_build_contour_npz_pack(
     pack_path: Path,
     rebuild: bool,
     file_workers: int = 1,
+    overlay_folder: Path | None = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     required_frames = required_contour_frames(list_image)
     if pack_path.exists() and not rebuild:
@@ -415,8 +480,8 @@ def load_or_build_contour_npz_pack(
 
     def load_one(item: Tuple[int, int, int, str]) -> Tuple[int, int, np.ndarray]:
         frame_idx, frame_number, art_idx, articulator = item
-        contour_path = image_folder / f"{frame_number:04d}_{articulator}.npy"
-        contour = np.load(contour_path).reshape(100).astype(np.float32, copy=False)
+        contour_path = resolve_contour_path(image_folder, frame_number, articulator, overlay_folder)
+        contour = canonicalize_contour(np.load(contour_path), contour_path)
         return frame_idx, art_idx, contour
 
     load_items = [
@@ -454,6 +519,8 @@ def load_or_build_contour_npz_pack(
         contours=contours,
         articulators=np.asarray(articulators),
         source_folder=np.asarray(str(image_folder)),
+        overlay_folder=np.asarray("" if overlay_folder is None else str(overlay_folder)),
+        contour_layout=np.asarray("xy_interleaved_50x2_flat"),
     )
     print(
         f"Saved contour npz pack {pack_path} with {len(frame_numbers)} frames "
@@ -466,7 +533,7 @@ def load_or_build_contour_npz_pack(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build dataset_cache_dir/*.pt for the ASD2 full single-task-5 config. "
+            "Build reusable per-session raw .pt/.npz caches for single-task-5 configs. "
             "Raw sessions are cached first, then assembled by top-level ASD2 "
             "bucket so normalization matches Corpus_contours while preprocessing "
             "can resume at session granularity."
@@ -480,7 +547,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir",
         default=None,
-        help="Output cache directory. Defaults to config['dataset_cache_dir'].",
+        help="Output cache directory. Defaults to config['session_cache_dir'] or config['dataset_cache_dir'].",
     )
     parser.add_argument(
         "--splits",
@@ -528,6 +595,13 @@ def parse_args() -> argparse.Namespace:
         default=25,
         help="Contour chunk progress interval passed to the raw session loader.",
     )
+    parser.add_argument(
+        "--only-sessions",
+        nargs="*",
+        default=None,
+        metavar="BUCKET/SESSION",
+        help="Optional session filter, e.g. --only-sessions 1804/S16 1804/S17.",
+    )
     return parser.parse_args()
 
 
@@ -537,6 +611,20 @@ def load_config(path: Path) -> Dict[str, Any]:
     if not isinstance(config, dict):
         raise ValueError(f"Config did not parse to a mapping: {path}")
     return config
+
+
+def parse_session_filter(values: list[str] | None) -> set[tuple[str, str]] | None:
+    if not values:
+        return None
+    session_filter = set()
+    for value in values:
+        if "/" not in value:
+            raise ValueError(f"Session filter must be BUCKET/SESSION, got: {value}")
+        bucket, session = value.split("/", 1)
+        if not bucket or not session:
+            raise ValueError(f"Session filter must be BUCKET/SESSION, got: {value}")
+        session_filter.add((bucket, session))
+    return session_filter
 
 
 def atomic_torch_save(payload: Dict[str, Any], path: Path) -> None:
@@ -644,11 +732,12 @@ def make_helper(config: Dict[str, Any], split_key: str, bucket: str) -> RawConto
     return RawContourSession(sub_config, split_key, rank=0)
 
 
-def assemble_bucket(config: Dict[str, Any], cache_dir: Path, split_key: str, bucket: str, rebuild: bool) -> Dict[str, Any]:
-    bucket_path = cache_dir / "bucket_parts" / split_key / f"{bucket}.pt"
-    if bucket_path.exists() and not rebuild:
-        return torch.load(bucket_path, map_location="cpu")["state"]
-
+def load_bucket_raw(
+    config: Dict[str, Any],
+    cache_dir: Path,
+    split_key: str,
+    bucket: str,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[int]]:
     features = []
     contours = []
     frames = []
@@ -664,25 +753,121 @@ def assemble_bucket(config: Dict[str, Any], cache_dir: Path, split_key: str, buc
         frames.extend(raw["frames"])
         phonemes.extend(raw["phonemes"])
         length_datas.extend([int(x) for x in raw["length_datas"]])
+    return features, contours, frames, phonemes, length_datas
+
+
+def fit_train_global_normalization(config: Dict[str, Any], cache_dir: Path) -> Dict[str, Any]:
+    fit_split = str(config.get("normalization_fit_split", "train_sequences"))
+    if fit_split not in SPLIT_FILES:
+        raise ValueError(f"normalization_fit_split must be one of {list(SPLIT_FILES)}, got {fit_split}")
+    fit_features = []
+    fit_contours = []
+    for bucket in config.get(fit_split, {}):
+        features, contours, _, _, _ = load_bucket_raw(config, cache_dir, fit_split, str(bucket))
+        fit_features.extend(features)
+        fit_contours.extend(contours)
+    if not fit_features or not fit_contours:
+        raise ValueError(f"No raw data available to fit normalization from {fit_split}")
+
+    contour_reshaped = [
+        traj.reshape(traj.shape[0], traj.shape[1] * traj.shape[2])
+        for traj in fit_contours
+    ]
+    std_contour = np.mean(np.array([np.std(frame, axis=0) for frame in contour_reshaped]), axis=0)
+    mean_contour = np.mean(np.array([np.mean(frame, axis=0) for frame in contour_reshaped]), axis=0)
+    std_mfcc = np.mean(np.array([np.std(frame, axis=0) for frame in fit_features]), axis=0)
+    mean_mfcc = np.mean(np.array([np.mean(frame, axis=0) for frame in fit_features]), axis=0)
+
+    std_contour = np.maximum(std_contour, 1e-8).reshape(len(config["classes"]), int(config["output_layer"]))
+    mean_contour = mean_contour.reshape(len(config["classes"]), int(config["output_layer"]))
+    std_mfcc = np.maximum(std_mfcc, 1e-8)
+
+    return {
+        "normalization_mode": "train_global",
+        "normalization_fit_split": fit_split,
+        "std_mfcc": std_mfcc.astype(np.float32),
+        "mean_mfcc": mean_mfcc.astype(np.float32),
+        "std_contour": std_contour.astype(np.float32),
+        "mean_contour": mean_contour.astype(np.float32),
+        "fit_num_sequences": len(fit_features),
+        "fit_num_frames": int(sum(int(feature.shape[0]) for feature in fit_features)),
+    }
+
+
+def save_train_global_normalization(cache_dir: Path, stats: Dict[str, Any]) -> None:
+    serializable = {
+        key: value
+        for key, value in stats.items()
+        if not isinstance(value, np.ndarray)
+    }
+    np.savez(
+        cache_dir / "normalization_train_global.npz",
+        std_mfcc=stats["std_mfcc"],
+        mean_mfcc=stats["mean_mfcc"],
+        std_contour=stats["std_contour"],
+        mean_contour=stats["mean_contour"],
+    )
+    write_metadata(cache_dir / "normalization_train_global.json", serializable)
+
+
+def assemble_bucket(
+    config: Dict[str, Any],
+    cache_dir: Path,
+    split_key: str,
+    bucket: str,
+    rebuild: bool,
+    norm_stats: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    bucket_path = cache_dir / "bucket_parts" / split_key / f"{bucket}.pt"
+    if bucket_path.exists() and not rebuild:
+        return torch.load(bucket_path, map_location="cpu")["state"]
+
+    features, contours, frames, phonemes, length_datas = load_bucket_raw(config, cache_dir, split_key, bucket)
 
     helper = make_helper(config, split_key, bucket)
-    std_mfcc, mean_mfcc, std_contour, mean_contour, moving_average = helper.calculate_norm(
-        str(bucket),
-        features,
-        contours,
-    )
+    if norm_stats is None:
+        std_mfcc, mean_mfcc, std_contour, mean_contour, moving_average = helper.calculate_norm(
+            str(bucket),
+            features,
+            contours,
+        )
+        std_contour_np = np.stack(std_contour)
+        mean_contour_np = np.stack(mean_contour)
+        std_for_norm = std_contour[None, :, :]
 
-    std_contour_np = np.stack(std_contour)
-    mean_contour_np = np.stack(mean_contour)
+        def normalize_contour(idx: int, contour: np.ndarray) -> np.ndarray:
+            return helper.normalize_labels(contour, std_for_norm, moving_average[idx])
+
+        norm_metadata = {
+            "normalization_mode": "bucket",
+            "normalization_fit_split": split_key,
+            "normalization_fit_bucket": bucket,
+        }
+    else:
+        std_mfcc = norm_stats["std_mfcc"]
+        mean_mfcc = norm_stats["mean_mfcc"]
+        std_contour_np = norm_stats["std_contour"]
+        mean_contour_np = norm_stats["mean_contour"]
+        std_for_norm = std_contour_np[None, :, :]
+        mean_for_norm = mean_contour_np[None, :, :]
+
+        def normalize_contour(idx: int, contour: np.ndarray) -> np.ndarray:
+            return helper.normalize_labels(contour, std_for_norm, mean_for_norm)
+
+        norm_metadata = {
+            "normalization_mode": norm_stats["normalization_mode"],
+            "normalization_fit_split": norm_stats["normalization_fit_split"],
+            "normalization_fit_bucket": None,
+        }
+
     std_items = [np.tile(std_contour_np, (1, 1, 1)) for _ in contours]
     mean_items = [np.tile(mean_contour_np, (1, 1, 1)) for _ in contours]
-    std_for_norm = std_contour[None, :, :]
 
     norm_features = []
     norm_contours = []
     for idx, (feature, contour) in enumerate(zip(features, contours)):
         norm_features.append(helper.normalize_inputs(feature, std_mfcc, mean_mfcc))
-        norm_contours.append(helper.normalize_labels(contour, std_for_norm, moving_average[idx]))
+        norm_contours.append(normalize_contour(idx, contour))
 
     tensors_inputs = [torch.tensor(seq, dtype=torch.float32) for seq in norm_features]
     tensors_outputs = [torch.tensor(seq, dtype=torch.float32) for seq in norm_contours]
@@ -729,6 +914,7 @@ def assemble_bucket(config: Dict[str, Any], cache_dir: Path, split_key: str, buc
         "num_samples": int(state["features"].shape[0]),
         "feature_shape": list(state["features"].shape),
         "label_shape": list(state["labels"].shape),
+        **norm_metadata,
     }
     bucket_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_torch_save(payload, bucket_path)
@@ -804,7 +990,13 @@ def filter_config_to_available_raw_sessions(
     return filtered, skipped
 
 
-def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebuild: bool) -> Dict[str, Any]:
+def assemble_split(
+    config: Dict[str, Any],
+    cache_dir: Path,
+    split_key: str,
+    rebuild: bool,
+    norm_stats: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     output_path = cache_dir / SPLIT_FILES[split_key]
     if output_path.exists() and not rebuild:
         state = torch.load(output_path, map_location="cpu")
@@ -820,7 +1012,7 @@ def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebu
         raise ValueError(f"No available sessions to assemble for split {split_key}")
 
     states = [
-        assemble_bucket(config, cache_dir, split_key, str(bucket), rebuild)
+        assemble_bucket(config, cache_dir, split_key, str(bucket), rebuild, norm_stats)
         for bucket in config[split_key]
     ]
     assembled = {
@@ -849,6 +1041,8 @@ def assemble_split(config: Dict[str, Any], cache_dir: Path, split_key: str, rebu
         "num_samples": int(assembled["features"].shape[0]),
         "feature_shape": list(assembled["features"].shape),
         "label_shape": list(assembled["labels"].shape),
+        "normalization_mode": "bucket" if norm_stats is None else norm_stats["normalization_mode"],
+        "normalization_fit_split": split_key if norm_stats is None else norm_stats["normalization_fit_split"],
     }
 
 
@@ -894,13 +1088,23 @@ def main() -> None:
     config = load_config(config_path)
     config["contour_pack_format"] = args.contour_pack_format
     config["rebuild_contour_packs"] = args.rebuild_contour_packs
-    cache_dir = Path(args.cache_dir or config["dataset_cache_dir"]).resolve()
+    cache_dir = Path(args.cache_dir or config.get("session_cache_dir") or config["dataset_cache_dir"]).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     (REPO_ROOT / "normalization_values").mkdir(parents=True, exist_ok=True)
     failed_sessions_path = Path(args.failed_sessions_path or cache_dir / "failed_sessions.json").resolve()
+    only_sessions = parse_session_filter(args.only_sessions)
 
     started_at = time.time()
     raw_jobs = list(iter_raw_jobs(config, cache_dir, args.splits, args.progress_every))
+    if only_sessions is not None:
+        raw_jobs = [
+            job for job in raw_jobs
+            if (job["bucket"], job["session"]) in only_sessions
+        ]
+        found_sessions = {(job["bucket"], job["session"]) for job in raw_jobs}
+        missing_filters = sorted(only_sessions - found_sessions)
+        if missing_filters:
+            raise ValueError(f"Requested --only-sessions entries are not in selected splits: {missing_filters}")
     to_build = [
         job for job in raw_jobs
         if args.rebuild_parts or not Path(job["part_path"]).exists()
@@ -909,6 +1113,12 @@ def main() -> None:
     print(f"config={config_path}", flush=True)
     print(f"cache_dir={cache_dir}", flush=True)
     print(f"splits={','.join(args.splits)}", flush=True)
+    if only_sessions is not None:
+        print(
+            "only_sessions="
+            + ",".join(f"{bucket}/{session}" for bucket, session in sorted(only_sessions)),
+            flush=True,
+        )
     print(f"raw_session_jobs={len(raw_jobs)} to_build={len(to_build)}", flush=True)
 
     raw_results = []
@@ -978,8 +1188,24 @@ def main() -> None:
     if args.raw_only:
         print("raw_only=true; skipping bucket/final split assembly", flush=True)
     else:
+        norm_stats = None
+        if normalization_mode(available_config) == "train_global":
+            norm_stats = fit_train_global_normalization(available_config, cache_dir)
+            save_train_global_normalization(cache_dir, norm_stats)
+            print(
+                "normalization_mode=train_global "
+                f"fit_split={norm_stats['normalization_fit_split']} "
+                f"fit_num_sequences={norm_stats['fit_num_sequences']} "
+                f"fit_num_frames={norm_stats['fit_num_frames']}",
+                flush=True,
+            )
+        elif normalization_mode(available_config) not in {"bucket", "per_bucket"}:
+            raise ValueError(
+                "Unsupported normalization_mode="
+                f"{available_config.get('normalization_mode')}; expected bucket or train_global"
+            )
         assemble_results = [
-            assemble_split(available_config, cache_dir, split_key, args.rebuild_assembled)
+            assemble_split(available_config, cache_dir, split_key, args.rebuild_assembled, norm_stats)
             for split_key in args.splits
         ]
         validation = validate_cache(available_config, cache_dir, args.splits)
@@ -994,7 +1220,10 @@ def main() -> None:
         "context_window": config["context_window"],
         "sequence_length": config["sequence_length"],
         "output_layer": config["output_layer"],
+        "normalization_mode": normalization_mode(available_config),
+        "normalization_fit_split": available_config.get("normalization_fit_split"),
         "contour_pack_format": args.contour_pack_format,
+        "only_sessions": None if only_sessions is None else [f"{b}/{s}" for b, s in sorted(only_sessions)],
         "raw_only": args.raw_only,
         "raw_results": sorted(raw_results, key=lambda x: (x["split"], x["bucket"], x["session"])),
         "failed_or_skipped_sessions": all_skipped,

@@ -2,6 +2,7 @@ import sys
 import os
 print(f"path : {os.getcwd()}")
 import os
+import json
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -16,6 +17,8 @@ from torchinfo import summary
 from tabulate import tabulate
 import psutil
 import gc
+from datetime import datetime
+from pathlib import Path
 
 
 class Train:
@@ -190,6 +193,7 @@ class Train:
             rmse = result_test['rmse_contours_mean_per_image_all_articulators']
             rmse_mm = result_test['rmse_contours_mean_all_images_all_articulators'] * 1.62
             print("RMSE mean per image (mm) : ", rmse_mm)
+            self._export_training_result(folder_run, result_test, rmse_mm)
             if not self.config.get('skip_outlier_detection', False):
                 raise RuntimeError("Outlier detection is not included in the minimal ST-5 branch.")
             if not self.config.get('skip_test_plots', False):
@@ -413,6 +417,89 @@ class Train:
                         file.write(f"{int(frame[0])}_S{int(frame[1])}_{frame[2]} | {one_ssim:.6f} | {one_rmse*1.62:.6f} | {phoneme}\n")
 
     
+    def _metric_float(self, result_test, key, scale=1.0):
+        value = result_test.get(key)
+        if value is None:
+            return None
+        return float(value) * scale
+
+    def _safe_result_name(self, value):
+        return str(value).replace("/", "_").replace(" ", "_")
+
+    def _link_or_copy(self, source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if not source_path.exists():
+            return None
+        if destination_path.exists() or destination_path.is_symlink():
+            destination_path.unlink()
+        try:
+            destination_path.symlink_to(source_path.resolve())
+        except OSError:
+            import shutil
+            shutil.copy2(source_path, destination_path)
+        return str(destination_path)
+
+    def _export_training_result(self, folder_run, result_test, rmse_mm):
+        result_root = Path(self.config.get("results_dir", Path(self.config["data_save"]) / "results"))
+        run_group = self._safe_result_name(self.config.get("folder_save", self.config.get("experiment_name", "training_run")))
+        run_name = self._safe_result_name(self.config.get("run_name", self.config.get("run_id", "run")))
+        output_dir = result_root / run_group / run_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        artifact_dir = Path(folder_run)
+        linked_files = {}
+        for filename in (
+            "best_model.pth",
+            "last_model.pth",
+            "final_model.pth",
+            "final_dict.pth",
+            "config.yaml",
+            "datasets.txt",
+            "rmse_per_image.txt",
+            "rmse_per_point.txt",
+            "MRI_metrics.txt",
+        ):
+            linked = self._link_or_copy(artifact_dir / filename, output_dir / filename)
+            if linked is not None:
+                linked_files[filename] = linked
+
+        metrics = {
+            "sequence_overall_rmse_mm": self._metric_float(result_test, "rmse_contours_mean_all_sequences_all_articulators", 1.62),
+            "image_overall_rmse_mm": self._metric_float(result_test, "rmse_contours_mean_all_images_all_articulators", 1.62),
+            "point_overall_rmse_mm": self._metric_float(result_test, "rmse_contours_mean_all_points_all_articulators", 1.62),
+            "mri_image_overall_rmse_mm": self._metric_float(result_test, "rmse_mris_mean_all_images", 1.62),
+            "mri_ssim_all_images": self._metric_float(result_test, "ssim_scores_all_images", 1.0),
+            "rmse_mean_per_image_mm_printed": float(rmse_mm),
+        }
+        summary = {
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "experiment_name": self.config.get("experiment_name"),
+            "run_name": self.config.get("run_name"),
+            "folder_save": self.config.get("folder_save"),
+            "experiment_id": self.config.get("experiment_id"),
+            "run_id": self.config.get("run_id"),
+            "artifact_dir": str(artifact_dir),
+            "results_dir": str(output_dir),
+            "best_model": linked_files.get("best_model.pth"),
+            "metrics": metrics,
+            "linked_artifacts": linked_files,
+            "post_train_inference": {
+                "status": "not_run_by_train_loop",
+                "note": "Use scripts/infer_session.py with this best_model path; inference outputs can be placed under this results_dir.",
+            },
+        }
+        with (output_dir / "training_summary.json").open("w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        with (output_dir / "training_summary.md").open("w", encoding="utf-8") as handle:
+            handle.write("# Training Summary\n\n")
+            handle.write(f"- results_dir: `{output_dir}`\n")
+            handle.write(f"- artifact_dir: `{artifact_dir}`\n")
+            handle.write(f"- best_model: `{summary['best_model']}`\n")
+            for key, value in metrics.items():
+                handle.write(f"- {key}: `{value}`\n")
+        print(f"Training result summary exported to: {output_dir}", flush=True)
+
 
     def log_memory(self, stage=""):
         process = psutil.Process(os.getpid())

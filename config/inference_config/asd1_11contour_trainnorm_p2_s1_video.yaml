@@ -1,0 +1,42 @@
+run_name: asd1_11contour_trainnorm_p2_s1_video
+dataset: asd1
+note: >
+  ASD1-only strict train-global normalization run. Prediction-only mode does
+  not load target labels/std/mean. Eval mode loads target labels only for
+  drawing and metrics, while prediction de-normalization uses train cache stats.
+
+train_config: config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml
+checkpoint: mlruns/520867610762211766/6adda377ad444e518ff1444142cf9eb3/artifacts/best_model.pth
+output_dir: results/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch/asd1_11contour_trainnorm_p2_s1_video
+device: cuda
+write_contours: true
+contour_output_format: xy50
+
+target:
+  speaker: 2
+  session: 1
+  split: test_sequences
+
+exclude_rmse_classes: []
+
+predict_only:
+  enabled: false
+  denorm_cache: repro/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch/splits/train_sequences.pt
+  video_name: predict_only_mri.mp4
+
+eval:
+  enabled: true
+  prediction_denorm_cache: repro/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch/splits/train_sequences.pt
+  video_name: eval_pred_vs_gt_mri.mp4
+  write_contours: true
+
+render:
+  fps: 12
+  scale: 4
+  background: gray
+  max_frames:
+  mri_dicom_dir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_1_raw/P2/DCM_2D/S1
+  dicom_index_method: filename
+  dicom_index_workers: 24
+  dicom_read_workers: 8
+  frame_offset: 0
