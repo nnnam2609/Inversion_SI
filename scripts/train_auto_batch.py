@@ -19,6 +19,9 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from src.model.baseline_5 import BaselineModel  # noqa: E402
+from src.utils.config_validation import load_yaml_config  # noqa: E402
+from src.utils.normalization import TRAINING_SPLIT_CACHE_KEYS, load_validated_split_cache_state  # noqa: E402
+from src.utils.split_cache_overrides import SPLIT_FILES, split_cache_dir  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,16 +32,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-batch", type=int, default=4096)
     parser.add_argument("--min-batch", type=int, default=1)
     parser.add_argument("--output-config-dir", type=Path, default=None)
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate config and any existing split caches, then exit before CUDA batch tuning.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-    if not isinstance(data, dict):
-        raise ValueError(f"Config did not parse to a mapping: {path}")
-    return data
+    return load_yaml_config(path)
 
 
 def save_yaml(data: dict[str, Any], path: Path) -> None:
@@ -55,6 +59,46 @@ def resolve_output_config_dir(config: dict[str, Any], requested: Path | None) ->
     split_cache = Path(config["split_cache_dir"]).resolve()
     repro_root = split_cache.parent
     return repro_root / "auto_batch_configs"
+
+
+def auto_batch_suffix(selected_batch_size: int, gpus: int) -> str:
+    return f"auto80_bs{int(selected_batch_size)}_{int(gpus)}gpu"
+
+
+def audit_existing_split_caches(config: dict[str, Any]) -> dict[str, Any]:
+    try:
+        base_dir = split_cache_dir(config).resolve()
+    except KeyError as exc:
+        return {
+            "status": "skipped",
+            "reason": str(exc),
+            "rows": [],
+        }
+    rows: list[dict[str, Any]] = []
+    for split_key, filename in SPLIT_FILES.items():
+        cache_path = base_dir / filename
+        row: dict[str, Any] = {
+            "split": split_key,
+            "cache_path": str(cache_path),
+        }
+        if not cache_path.exists():
+            row["status"] = "missing"
+            rows.append(row)
+            continue
+        _state, floor_summary = load_validated_split_cache_state(
+            cache_path,
+            config,
+            required_keys=TRAINING_SPLIT_CACHE_KEYS,
+        )
+        row.update({"status": "ok", **floor_summary})
+        rows.append(row)
+    return {
+        "status": "ok",
+        "split_cache_dir": str(base_dir),
+        "num_ok": sum(1 for row in rows if row["status"] == "ok"),
+        "num_missing": sum(1 for row in rows if row["status"] == "missing"),
+        "rows": rows,
+    }
 
 
 def clear_cuda() -> None:
@@ -155,14 +199,20 @@ def main() -> None:
     args = parse_args()
     config_path = args.config.resolve()
     config = load_yaml(config_path)
+    split_cache_preflight = audit_existing_split_caches(config)
+    print("split_cache_preflight " + json.dumps(split_cache_preflight, sort_keys=True), flush=True)
+    if args.preflight_only:
+        return
     tuning = tune_batch_size(config, args.target_util, args.min_batch, args.max_batch)
     runtime_config = dict(config)
     runtime_config["batch_size"] = int(tuning["selected_batch_size"])
     runtime_config["auto_batch_tuning"] = tuning
-    runtime_config["run_name_suffix"] = f"auto80_bs{tuning['selected_batch_size']}_4gpu"
+    runtime_config["split_cache_preflight"] = split_cache_preflight
+    suffix = auto_batch_suffix(tuning["selected_batch_size"], args.gpus)
+    runtime_config["run_name_suffix"] = suffix
     output_dir = resolve_output_config_dir(runtime_config, args.output_config_dir)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    runtime_config_path = output_dir / f"{config_path.stem}_auto80_4gpu_{timestamp}.yaml"
+    runtime_config_path = output_dir / f"{config_path.stem}_{suffix}_{timestamp}.yaml"
     save_yaml(runtime_config, runtime_config_path)
     report_path = runtime_config_path.with_suffix(".json")
     report_path.write_text(json.dumps(tuning, indent=2, sort_keys=True), encoding="utf-8")

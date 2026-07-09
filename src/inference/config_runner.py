@@ -8,10 +8,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from src.utils.config_validation import load_yaml_config  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,11 +23,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-    if not isinstance(data, dict):
-        raise ValueError(f"Config did not parse to a mapping: {path}")
-    return data
+    return load_yaml_config(path)
 
 
 def resolve_path(value: str | Path | None) -> Path | None:

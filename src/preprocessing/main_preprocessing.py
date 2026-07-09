@@ -18,6 +18,8 @@ import time
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 from transformers import AutoFeatureExtractor, HubertModel
 
+from utils.normalization import apply_std_floor, normalization_std_floors
+
 
 def _numeric_id(value):
     digits = "".join(ch for ch in str(value) if ch.isdigit())
@@ -645,12 +647,14 @@ class Corpus(Dataset):
         num_features = contour_sequence[0].shape[1]  # Par exemple, 3 articulateurs
         feature_length = contour_sequence[0].shape[2]  # Longueur d'un contour
         
-        std_contour = std_contour.reshape(num_features, feature_length)
+        contour_std_floor, mfcc_std_floor = normalization_std_floors(self.config)
+        std_contour = apply_std_floor(std_contour, contour_std_floor).reshape(num_features, feature_length)
         mean_contour = mean_contour.reshape(num_features, feature_length)
         moving_average = moving_average.reshape(moving_average.shape[0], num_features, feature_length)  # Calculé sur plusieurs frames
         
         std_mfcc = np.mean(np.array([np.std(frame, axis=0) for frame in mfcc_sequence]), axis=0)
         mean_mfcc = np.mean(np.array([np.mean(frame, axis=0) for frame in mfcc_sequence]), axis=0)
+        std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor)
         
         np.save(os.path.join("normalization_values", f"moving_average_contour_{sequence}"), moving_average)
         np.save(os.path.join("normalization_values", f"std_contour_{sequence}"), std_contour)
@@ -689,12 +693,15 @@ class Corpus(Dataset):
         # for traj in contour_sequence
         # ]
         
+        contour_std_floor, mfcc_std_floor = normalization_std_floors(self.config)
         std_contour = np.mean(np.array([np.std(frame, axis=0) for frame in contour_sequence]), axis=0)
         mean_contour = np.mean(np.array([np.mean(frame, axis=0) for frame in contour_sequence]), axis=0)
+        std_contour = apply_std_floor(std_contour, contour_std_floor)
 
 
         std_mfcc = np.mean(np.array([np.std(frame, axis=0) for frame in mfcc_sequence]), axis=0)
         mean_mfcc = np.mean(np.array([np.mean(frame, axis=0) for frame in mfcc_sequence]), axis=0)
+        std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor)
 
         np.save(os.path.join("normalization_values", f"std_contour_{sequence}"), std_contour)
         np.save(os.path.join("normalization_values", f"mean_contour_{sequence}"), mean_contour)
@@ -795,8 +802,8 @@ class Corpus(Dataset):
         Returns:
             np.ndarray: The normalized contour.
         """
-        epsilon = 1e-8  # Un petit nombre pour éviter la division par zéro
-        std_contour = np.maximum(std_contour, epsilon)  # Remplace les zéros par epsilon
+        contour_std_floor, _ = normalization_std_floors(self.config)
+        std_contour = apply_std_floor(std_contour, contour_std_floor)
         normalized_contour = (single_contour - single_moving_average) / std_contour
         return normalized_contour
         return single_contour
@@ -877,8 +884,8 @@ class Corpus(Dataset):
         Returns:
             np.ndarray: Normalized MFCC sequence.
         """
-        epsilon = 1e-8  # Un petit nombre pour éviter la division par zéro
-        std_mfcc = np.maximum(std_mfcc, epsilon)  # Remplace les zéros par epsilon
+        _, mfcc_std_floor = normalization_std_floors(self.config)
+        std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor)
         normalized_mfcc = (single_mfcc - mean_mfcc) / std_mfcc
         return normalized_mfcc   
 

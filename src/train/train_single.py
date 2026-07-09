@@ -10,6 +10,7 @@ from src.model.baseline_5 import BaselineModel
 #from src.model.tcn import BaselineModel
 #from src.model.model_lstm import BaselineModel
 import utils.metrics as metrics
+from src.utils.temporal_loss import contour_velocity_loss
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import mlflow
@@ -141,6 +142,15 @@ class TrainSingle(Train):
 
         loss_mse_mean = metrics.loss_rmse(y_batch, y_pred)
         loss_mse = metrics.loss_mse(y_batch, y_pred)
+        velocity_weight = float(self.config.get("contour_velocity_loss_weight", 0.0))
+        if velocity_weight:
+            velocity_reduction = str(self.config.get("contour_velocity_loss_reduction", "mean"))
+            loss_mse = loss_mse + velocity_weight * contour_velocity_loss(
+                y_batch,
+                y_pred,
+                length_sequences,
+                reduction=velocity_reduction,
+            )
 
         y_batch_unormalized = (y_batch * std) + mean
         y_pred_unormalized = (y_pred * std) + mean

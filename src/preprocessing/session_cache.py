@@ -19,7 +19,6 @@ import numpy as np
 import textgrid
 import torch
 import torchaudio
-import yaml
 from torch.nn.utils.rnn import pad_sequence
 
 
@@ -31,6 +30,14 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from preprocessing.contours_preprocessing import Corpus_contours  # noqa: E402
 from preprocessing.main_preprocessing import Corpus  # noqa: E402
+from utils.config_validation import load_yaml_config  # noqa: E402
+from utils.normalization import (  # noqa: E402
+    TRAINING_SPLIT_CACHE_KEYS,
+    apply_std_floor,
+    load_validated_split_cache_state,
+    normalization_floor_metadata,
+    normalization_std_floors,
+)
 
 
 SPLIT_FILES = {
@@ -606,11 +613,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    if not isinstance(config, dict):
-        raise ValueError(f"Config did not parse to a mapping: {path}")
-    return config
+    return load_yaml_config(path)
 
 
 def parse_session_filter(values: list[str] | None) -> set[tuple[str, str]] | None:
@@ -760,6 +763,8 @@ def fit_train_global_normalization(config: Dict[str, Any], cache_dir: Path) -> D
     fit_split = str(config.get("normalization_fit_split", "train_sequences"))
     if fit_split not in SPLIT_FILES:
         raise ValueError(f"normalization_fit_split must be one of {list(SPLIT_FILES)}, got {fit_split}")
+    contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+
     fit_features = []
     fit_contours = []
     for bucket in config.get(fit_split, {}):
@@ -778,13 +783,14 @@ def fit_train_global_normalization(config: Dict[str, Any], cache_dir: Path) -> D
     std_mfcc = np.mean(np.array([np.std(frame, axis=0) for frame in fit_features]), axis=0)
     mean_mfcc = np.mean(np.array([np.mean(frame, axis=0) for frame in fit_features]), axis=0)
 
-    std_contour = np.maximum(std_contour, 1e-8).reshape(len(config["classes"]), int(config["output_layer"]))
+    std_contour = apply_std_floor(std_contour, contour_std_floor).reshape(len(config["classes"]), int(config["output_layer"]))
     mean_contour = mean_contour.reshape(len(config["classes"]), int(config["output_layer"]))
-    std_mfcc = np.maximum(std_mfcc, 1e-8)
+    std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor)
 
     return {
         "normalization_mode": "train_global",
         "normalization_fit_split": fit_split,
+        **normalization_floor_metadata(config),
         "std_mfcc": std_mfcc.astype(np.float32),
         "mean_mfcc": mean_mfcc.astype(np.float32),
         "std_contour": std_contour.astype(np.float32),
@@ -999,7 +1005,11 @@ def assemble_split(
 ) -> Dict[str, Any]:
     output_path = cache_dir / SPLIT_FILES[split_key]
     if output_path.exists() and not rebuild:
-        state = torch.load(output_path, map_location="cpu")
+        state, floor_summary = load_validated_split_cache_state(
+            output_path,
+            config,
+            required_keys=TRAINING_SPLIT_CACHE_KEYS,
+        )
         return {
             "split": split_key,
             "path": str(output_path),
@@ -1007,6 +1017,7 @@ def assemble_split(
             "num_samples": int(state["features"].shape[0]),
             "feature_shape": list(state["features"].shape),
             "label_shape": list(state["labels"].shape),
+            **floor_summary,
         }
     if not config.get(split_key):
         raise ValueError(f"No available sessions to assemble for split {split_key}")

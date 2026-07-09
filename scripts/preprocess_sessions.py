@@ -11,8 +11,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -26,6 +24,7 @@ from preprocessing.session_cache import (  # noqa: E402
     raw_session_part_path,
     write_metadata,
 )
+from src.utils.config_validation import load_yaml_config  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,11 +39,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-    if not isinstance(data, dict):
-        raise ValueError(f"Config did not parse to a mapping: {path}")
-    return data
+    return load_yaml_config(path)
 
 
 def merge_base_config(config: Dict[str, Any]) -> Dict[str, Any]:

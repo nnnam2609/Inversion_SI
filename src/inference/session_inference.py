@@ -12,15 +12,20 @@ from typing import Any
 
 import numpy as np
 import torch
-import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from src.model.baseline_5 import BaselineModel  # noqa: E402
-
-MM_PER_PIXEL = 1.62
+from src.utils.config_validation import load_yaml_config  # noqa: E402
+from src.utils.normalization import (  # noqa: E402
+    DENORM_SPLIT_CACHE_KEYS,
+    INFERENCE_SPLIT_CACHE_KEYS,
+    describe_split_denorm,
+    load_validated_split_cache_state,
+)
+from src.utils.video_rendering import MM_PER_PIXEL  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,11 +82,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        config = yaml.safe_load(handle)
-    if not isinstance(config, dict):
-        raise ValueError(f"Config did not parse to a mapping: {path}")
-    return config
+    return load_yaml_config(path)
 
 
 def resolve_device(device_arg: str) -> torch.device:
@@ -152,10 +153,18 @@ def select_session_indices(state: dict[str, Any], speaker: int, session: int) ->
     return indices
 
 
-def load_reference_denorm(cache_path: Path, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+def load_reference_denorm(
+    cache_path: Path,
+    device: torch.device,
+    config: dict[str, Any],
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     if not cache_path.exists():
         raise FileNotFoundError(f"Missing de-normalization cache: {cache_path}")
-    state = torch.load(cache_path, map_location="cpu")
+    state, floor_summary = load_validated_split_cache_state(
+        cache_path,
+        config,
+        required_keys=DENORM_SPLIT_CACHE_KEYS,
+    )
     if "std" not in state or "mean" not in state:
         raise KeyError(f"De-normalization cache must contain std and mean tensors: {cache_path}")
     std_cpu = state["std"].float()
@@ -171,54 +180,9 @@ def load_reference_denorm(cache_path: Path, device: torch.device) -> tuple[torch
         "denorm_std_shape": list(std_cpu.shape),
         "denorm_mean_shape": list(mean_cpu.shape),
         "uses_target_std_mean": False,
+        **floor_summary,
     }
     return std_ref, mean_ref, metadata
-
-
-def load_cache_metadata(cache_path: Path) -> dict[str, Any]:
-    for metadata_name in (
-        "split_cache_metadata.json",
-        "metadata_blind_single_task5.json",
-        "metadata_asd2_full_single_task5.json",
-        "metadata.json",
-    ):
-        metadata_path = cache_path.parent / metadata_name
-        if metadata_path.exists():
-            with metadata_path.open("r", encoding="utf-8") as handle:
-                metadata = json.load(handle)
-            if isinstance(metadata, dict):
-                metadata["metadata_path"] = str(metadata_path)
-                return metadata
-    return {}
-
-
-def describe_split_denorm(cache_path: Path, config: dict[str, Any]) -> dict[str, Any]:
-    cache_metadata = load_cache_metadata(cache_path)
-    normalization_mode = cache_metadata.get("normalization_mode", config.get("normalization_mode"))
-    normalization_fit_split = cache_metadata.get("normalization_fit_split")
-    normalization_fit_splits = cache_metadata.get("normalization_fit_splits")
-    train_split_stats = (
-        normalization_fit_split == "train_sequences"
-        or normalization_fit_splits == ["train_sequences"]
-    )
-    if train_split_stats:
-        denorm_method = "train_global_std_mean_from_cache"
-        uses_target_std_mean = False
-        std_mean_source_split = "train_sequences"
-    else:
-        denorm_method = "split_cache_std_mean"
-        uses_target_std_mean = True
-        std_mean_source_split = cache_path.stem
-    return {
-        "denorm_cache": str(cache_path),
-        "denorm_method": denorm_method,
-        "normalization_mode": normalization_mode,
-        "normalization_fit_split": normalization_fit_split,
-        "normalization_fit_splits": normalization_fit_splits,
-        "std_mean_source_split": std_mean_source_split,
-        "uses_target_std_mean": uses_target_std_mean,
-        "cache_metadata": cache_metadata.get("metadata_path"),
-    }
 
 
 def rmse_class_mask(config: dict[str, Any], excluded_classes: list[str], device: torch.device) -> tuple[torch.Tensor | None, list[str]]:
@@ -298,9 +262,11 @@ def main() -> None:
         raise ValueError("--prediction-denorm-cache is for compare/metric mode, not --prediction-only")
     config = load_config(args.config)
     cache_path = split_cache_path(config, args.split)
-    if not cache_path.exists():
-        raise FileNotFoundError(f"Missing split cache: {cache_path}")
-    state = torch.load(cache_path, map_location="cpu")
+    state, cache_floor_summary = load_validated_split_cache_state(
+        cache_path,
+        config,
+        required_keys=INFERENCE_SPLIT_CACHE_KEYS,
+    )
     speaker = int(args.speaker)
     session = int(args.session)
     indices = select_session_indices(state, speaker, session)
@@ -321,7 +287,7 @@ def main() -> None:
     with torch.no_grad():
         predicted, _, _ = model(features, lengths)
         if args.prediction_only:
-            denorm_std, denorm_mean, denorm_metadata = load_reference_denorm(args.denorm_cache, device)
+            denorm_std, denorm_mean, denorm_metadata = load_reference_denorm(args.denorm_cache, device, config)
             predicted_raw = (predicted * denorm_std) + denorm_mean
             labels = None
             labels_raw = None
@@ -333,7 +299,11 @@ def main() -> None:
             labels = labels[:, : predicted.shape[1]]
             labels_raw = (labels * std) + mean
             if args.prediction_denorm_cache is not None:
-                denorm_std, denorm_mean, denorm_metadata = load_reference_denorm(args.prediction_denorm_cache, device)
+                denorm_std, denorm_mean, denorm_metadata = load_reference_denorm(
+                    args.prediction_denorm_cache,
+                    device,
+                    config,
+                )
                 predicted_raw = (predicted * denorm_std) + denorm_mean
                 denorm_metadata.update(
                     {
@@ -353,6 +323,7 @@ def main() -> None:
                             denorm_metadata.get("uses_target_std_mean", False)
                         ),
                         "uses_target_std_mean_for_labels": True,
+                        **cache_floor_summary,
                     }
                 )
             metric_predicted_raw = predicted_raw if class_mask is None else predicted_raw[:, :, class_mask]

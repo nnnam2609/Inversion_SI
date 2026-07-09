@@ -96,14 +96,27 @@ Important fields:
 ```yaml
 session_cache_dir: /.../Inversion_SI/cache
 split_cache_dir: /.../Inversion_SI/repro/<run>/splits
-speaker_independent: true
+normalization_mode: train_global
+normalization_fit_split: train_sequences
 skip_bad_session_cache: true
 ```
 
 Normalization policy:
 
-- `speaker_independent: true`: fit normalization on train only, then apply to validation/test. Use this for ASD1 speaker-independent experiments such as P1 validation and P2 test.
-- `speaker_independent: false`: fit normalization on train+validation+test and apply to all splits. Use this for ASD2 same-speaker/session-bucket experiments.
+- `normalization_mode: train_global` is the default unseen-speaker path: fit normalization on `normalization_fit_split` (default `train_sequences`) only, then apply the same stats to validation/test. Use this for ASD1 experiments such as P7 train/validation with P2 test-only.
+- `normalization_mode: all_splits_global` is explicit opt-in for fitting normalization on train+validation+test together.
+- Contour normalization uses a project minimum `normalization_contour_std_floor: 0.1`. Normal runs may keep or raise this floor; lower values are rejected unless `allow_low_contour_std_floor_diagnostic: true` is set for a diagnostic run. This avoids stale near-zero contour std values that make de-normalized predictions look almost static.
+- Split cache metadata records the std-floor source (`default`, `normalization_contour_std_floor`, or legacy `contour_std_floor`) so old configs remain traceable.
+- Inference validates the contour std floor for any split cache used to de-normalize predictions. If an old cache fails this check, rebuild the split cache with the current normalization policy.
+- Cached-prediction render scripts also compute prediction-motion diagnostics and reject frozen payloads, nearly static labeled payloads whose pred/label frame-diff ratio is below `0.20`, and under-moving labeled payloads whose pred/label coordinate-std ratio is below the guard threshold, unless an explicit diagnostic flag is used.
+- Audio VTLN for final inversion RMSE/video must use `scripts/build_inversion_frontend_vtln_eval_cache.py`, which re-extracts MFCC through the Inversion_SI frontend and chunking. The legacy exported-NPZ override script is diagnostic-only and is blocked by default.
+- Session inference rejects configs containing the legacy `audio_vtln_feature_npz` key before loading the model, so stale exported-NPZ audio VTLN configs cannot create new under-moving prediction payloads by accident.
+- Quick config audit:
+  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/audit_normalization_configs.py config/train_config/<file>.yaml`.
+  The audit fails on low contour std-floor settings and legacy exported-NPZ audio VTLN configs; add `--allow-legacy-audio-vtln` only when inventorying old diagnostic configs.
+- Quick split-cache audit:
+  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/audit_split_cache_normalization.py config/train_config/<file>.yaml --splits train_sequences test_sequences`.
+  The audit loads split `.pt` files on CPU and fails if cached contour `std` is below the configured floor, which is the stale-cache failure mode that can make prediction contours look under-moving.
 
 Launch training inside OAR:
 
@@ -120,6 +133,22 @@ PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/train_auto_batch.py \
   --gpus 4 \
   --target-util 0.80
 ```
+
+Prepare an OAR auto-batch job without submitting:
+
+```bash
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/submit_auto_batch_oar.py \
+  --config config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml \
+  --python ../inversion/.venv/bin/python \
+  --gpus 1 \
+  --cluster gres \
+  --walltime 02:00:00
+```
+
+Pass `--submit` only when you intend to call `oarsub`. The helper runs the
+CPU-safe split-cache preflight first, writes `job_auto_batch.sh` and
+`submit_manifest.json`, and keeps the venv Python symlink path intact instead
+of resolving it to the system Python.
 
 After a successful test pass, training writes a compact result bundle to:
 
@@ -165,6 +194,35 @@ output_dir/eval_pred_vs_gt_mri.mp4
 ```
 
 Predicted contours are averaged across overlapping sequence predictions per frame and articulator.
+
+## Grid Transform Submodule
+
+`grid-transform` is included as a Git submodule at:
+
+```text
+external/grid-transform/
+```
+
+Clone/update it with:
+
+```bash
+git submodule update --init --recursive
+```
+
+The submodule contains the reusable `grid_transform/` Python package, bundled VTLN reference data under `VTLN/data/`, and the canonical command wrappers under `scripts/run/`.
+
+Use the local helper to run a wrapper from this repo with the workspace inversion environment and the right `PYTHONPATH`:
+
+```bash
+scripts/run_grid_transform.py run_create_speaker_grid.py --help
+scripts/run_grid_transform.py run_create_speaker_grid.py --source vtln --speaker 1640_P7_S2_F0829
+```
+
+Current environment note:
+
+- `external/grid-transform/pyproject.toml` declares Python `>=3.10`.
+- The shared workspace env `../inversion/.venv` is currently Python `3.9.2`, so the submodule is used through `PYTHONPATH` instead of editable install.
+- Runtime dependencies needed by the submodule and not already present in the inversion env are pinned in `requirements.txt`: `imageio`, `roifile`, and `shapely`.
 
 ## Current Reference Configs
 

@@ -211,7 +211,6 @@ rebuild_dataset_cache: false
 session_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/cache
 split_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_full_preprocessed_paper_st5_mfcc_500epoch_grele/splits
 dataset_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_full_preprocessed_paper_st5_mfcc_500epoch_grele/splits
-speaker_independent: false
 skip_bad_session_cache: true
 load_labels_progress_every: 25
 contour_file_workers: 18

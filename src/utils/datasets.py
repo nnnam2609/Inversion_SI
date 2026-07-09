@@ -8,6 +8,11 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data import DataLoader, DistributedSampler
 from train.split_cache import ensure_split_caches, split_cache_path
+from utils.normalization import (
+    TRAINING_SPLIT_CACHE_KEYS,
+    load_validated_split_cache_state,
+    validate_contour_std_floor,
+)
 
 
 class CachedContourDataset(Dataset):
@@ -94,7 +99,9 @@ def _load_assembled_cache_dataset(config, split_key):
         raise FileNotFoundError(f"Assembled dataset cache is missing: {cache_path}")
     print(f"Loading assembled dataset cache for {split_key}: {cache_path}", flush=True)
     assembled = torch.load(cache_path, map_location='cpu')
-    return CachedContourDataset(_state_from_assembled_payload(assembled['payload']))
+    state = _state_from_assembled_payload(assembled['payload'])
+    validate_contour_std_floor(state, config, cache_path)
+    return CachedContourDataset(state)
 
 
 def _load_or_build_contour_dataset(config, split_key, rank, world_size):
@@ -109,10 +116,13 @@ def _load_or_build_contour_dataset(config, split_key, rank, world_size):
                 dist.barrier()
             config['_split_cache_ready'] = True
         cache_path = split_cache_path(config, split_key)
-        if not cache_path.exists():
-            raise FileNotFoundError(f"Split cache was not created: {cache_path}")
         print(f"Loading split cache for {split_key}: {cache_path}", flush=True)
-        return CachedContourDataset(torch.load(cache_path, map_location='cpu'))
+        state, _floor_summary = load_validated_split_cache_state(
+            cache_path,
+            config,
+            required_keys=TRAINING_SPLIT_CACHE_KEYS,
+        )
+        return CachedContourDataset(state)
 
     if not config.get('cache_dataset', False):
         return Corpus_contours(config, split_key, rank)
@@ -138,7 +148,12 @@ def _load_or_build_contour_dataset(config, split_key, rank, world_size):
         raise FileNotFoundError(f"Dataset cache was not created: {cache_path}")
 
     print(f"Loading dataset cache for {split_key}: {cache_path}", flush=True)
-    return CachedContourDataset(torch.load(cache_path, map_location='cpu'))
+    state, _floor_summary = load_validated_split_cache_state(
+        cache_path,
+        config,
+        required_keys=TRAINING_SPLIT_CACHE_KEYS,
+    )
+    return CachedContourDataset(state)
 
 
 def _dataloader_kwargs(config):

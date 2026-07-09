@@ -1,6 +1,12 @@
 import yaml
 import random
 import argparse
+from pathlib import Path
+
+try:
+    from .config_validation import load_yaml_config
+except ImportError:  # pragma: no cover - supports direct legacy execution.
+    from utils.config_validation import load_yaml_config
 
 def split_dataset(dataset, train_ratio=0.8, val_ratio=0.1):
     """
@@ -147,6 +153,6 @@ def read_datas():
         all_data = split_dataset(datasets)
         save_merged_dataset(all_data, config_path)
     
-    # Read and parse the YAML configuration file
-    config = read_yaml(config_path)
+    # Read and validate the YAML training config.
+    config = load_yaml_config(Path(config_path))
     return config, phonemes_arg, autoencoder_arg, model_type, checkpoint_path

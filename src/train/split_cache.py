@@ -19,9 +19,17 @@ from preprocessing.session_cache import (
     recompute_mean_datas,
     write_metadata,
 )
+from utils.normalization import (
+    TRAINING_SPLIT_CACHE_KEYS,
+    apply_std_floor,
+    load_validated_split_cache_state,
+    normalization_floor_metadata,
+    normalization_std_floors,
+)
 
 
 REQUIRED_RAW_KEYS = {"features", "contours", "frames", "phonemes", "length_datas"}
+DEFAULT_NORMALIZATION_MODE = "train_global"
 
 
 def session_cache_dir(config: Dict[str, Any]) -> Path:
@@ -42,6 +50,28 @@ def split_cache_path(config: Dict[str, Any], split_key: str) -> Path:
     if split_key not in SPLIT_FILES:
         raise ValueError(f"Unknown split {split_key}; expected one of {list(SPLIT_FILES)}")
     return split_cache_dir(config) / SPLIT_FILES[split_key]
+
+
+def split_normalization_plan(
+    config: Dict[str, Any],
+    splits: Iterable[str],
+) -> Tuple[Tuple[str, ...], str]:
+    """Resolve split-cache normalization from the explicit normalization mode."""
+    available_splits = tuple(splits)
+    mode = str(config.get("normalization_mode", DEFAULT_NORMALIZATION_MODE)).lower()
+    if mode in {"train_global", "train_only_global", "unseen_speaker"}:
+        fit_split = str(config.get("normalization_fit_split", "train_sequences"))
+        if fit_split not in available_splits:
+            raise ValueError(
+                f"normalization_fit_split must be one of {list(available_splits)}, got {fit_split}"
+            )
+        return (fit_split,), "train_global"
+    if mode in {"all_splits_global", "all_global", "speaker_dependent"}:
+        return available_splits, "all_splits_global"
+    raise ValueError(
+        f"Unsupported normalization_mode={config.get('normalization_mode')!r}; "
+        "expected train_global or all_splits_global"
+    )
 
 
 def _iter_declared_sessions(config: Dict[str, Any], splits: Iterable[str]) -> Iterable[Tuple[str, str, str]]:
@@ -166,6 +196,8 @@ def fit_normalization(
     fit_splits: Iterable[str],
     mode: str,
 ) -> Dict[str, Any]:
+    contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+
     fit_features: List[np.ndarray] = []
     fit_contours: List[np.ndarray] = []
     for split_key in fit_splits:
@@ -187,12 +219,14 @@ def fit_normalization(
     return {
         "normalization_mode": mode,
         "normalization_fit_splits": list(fit_splits),
-        "std_mfcc": np.maximum(std_mfcc, 1e-8).astype(np.float32),
+        **normalization_floor_metadata(config),
+        "std_mfcc": apply_std_floor(std_mfcc, mfcc_std_floor, np.float32),
         "mean_mfcc": mean_mfcc.astype(np.float32),
-        "std_contour": np.maximum(
+        "std_contour": apply_std_floor(
             std_contour.reshape(len(config["classes"]), int(config["output_layer"])),
-            1e-8,
-        ).astype(np.float32),
+            contour_std_floor,
+            np.float32,
+        ),
         "mean_contour": mean_contour.reshape(
             len(config["classes"]),
             int(config["output_layer"]),
@@ -223,7 +257,11 @@ def assemble_split_direct(
 ) -> Dict[str, Any]:
     output_path = split_cache_path(config, split_key)
     if output_path.exists() and not rebuild:
-        state = torch.load(output_path, map_location="cpu")
+        state, floor_summary = load_validated_split_cache_state(
+            output_path,
+            config,
+            required_keys=TRAINING_SPLIT_CACHE_KEYS,
+        )
         return {
             "split": split_key,
             "path": str(output_path),
@@ -231,6 +269,7 @@ def assemble_split_direct(
             "num_samples": int(state["features"].shape[0]),
             "feature_shape": list(state["features"].shape),
             "label_shape": list(state["labels"].shape),
+            **floor_summary,
         }
     features, contours, frames, phonemes, length_datas = load_raw_split(config, split_key)
     if not features:
@@ -313,11 +352,8 @@ def ensure_split_caches(config: Dict[str, Any]) -> Dict[str, Any]:
             flush=True,
         )
 
-    speaker_independent = bool(usable_config.get("speaker_independent", False))
-    if speaker_independent:
-        norm_stats = fit_normalization(usable_config, ("train_sequences",), "train_only_global")
-    else:
-        norm_stats = fit_normalization(usable_config, splits, "all_splits_global")
+    fit_splits, normalization_mode_name = split_normalization_plan(usable_config, splits)
+    norm_stats = fit_normalization(usable_config, fit_splits, normalization_mode_name)
 
     rebuild = bool(usable_config.get("rebuild_split_cache", usable_config.get("rebuild_dataset_cache", False)))
     assemble_results = [
@@ -328,9 +364,18 @@ def ensure_split_caches(config: Dict[str, Any]) -> Dict[str, Any]:
     metadata = {
         "session_cache_dir": str(session_cache_dir(usable_config)),
         "split_cache_dir": str(output_dir),
-        "speaker_independent": speaker_independent,
         "normalization_mode": norm_stats["normalization_mode"],
         "normalization_fit_splits": norm_stats["normalization_fit_splits"],
+        "normalization_fit_split": (
+            norm_stats["normalization_fit_splits"][0]
+            if len(norm_stats["normalization_fit_splits"]) == 1
+            else None
+        ),
+        "normalization_contour_std_floor": norm_stats["normalization_contour_std_floor"],
+        "normalization_mfcc_std_floor": norm_stats["normalization_mfcc_std_floor"],
+        "normalization_contour_std_floor_source": norm_stats["normalization_contour_std_floor_source"],
+        "normalization_mfcc_std_floor_source": norm_stats["normalization_mfcc_std_floor_source"],
+        "normalization_used_legacy_std_floor_key": norm_stats["normalization_used_legacy_std_floor_key"],
         "fit_num_sequences": norm_stats["fit_num_sequences"],
         "fit_num_frames": norm_stats["fit_num_frames"],
         "assemble_results": assemble_results,
