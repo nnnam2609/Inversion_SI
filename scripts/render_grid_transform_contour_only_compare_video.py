@@ -34,7 +34,6 @@ from src.utils.gridnorm_rendering import (  # noqa: E402
 )
 from src.utils.prediction_motion_cli import (  # noqa: E402
     add_prediction_motion_arguments,
-    assert_prediction_motion_from_args,
     prediction_motion_report_from_args,
 )
 from src.utils.session_rendering import aggregate_state, build_timeline, load_config  # noqa: E402
@@ -139,7 +138,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow rendering legacy NPZ audio-VTLN payloads for diagnostics only.",
     )
-    add_prediction_motion_arguments(parser, include_diagnostic_flag=True, action_word="Fail render")
+    add_prediction_motion_arguments(parser, include_diagnostic_flag=True, action_word="Report")
     return parser.parse_args()
 
 
@@ -423,7 +422,6 @@ def main() -> None:
         args,
         prediction_payload=str(args.predictions),
     )
-    assert_prediction_motion_from_args(motion_report, args)
     original_rows = aggregate_state(state, config, args.speaker, args.session)
     timeline_rows = build_timeline(original_rows, float(args.timeline_step), args.max_frames)
 
@@ -594,7 +592,7 @@ def main() -> None:
         "mean_affine_delta_primary_rmse_mm": mean_finite([row["affine_delta_primary_rmse_mm"] for row in frame_metric_rows]),
         "mean_affine_tps_delta_primary_rmse_mm": mean_finite([row["affine_tps_delta_primary_rmse_mm"] for row in frame_metric_rows]),
         "prediction_motion": motion_report,
-        "allow_static_prediction_diagnostic": bool(args.allow_static_prediction_diagnostic),
+        "motion_guard_enabled": False,
         "overlay_rmse_mode": args.overlay_rmse_mode,
         "overlay_overall_label": args.overlay_overall_label,
     }

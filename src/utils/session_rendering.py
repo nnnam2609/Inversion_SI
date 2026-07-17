@@ -37,6 +37,122 @@ def frame_token(value: float) -> str:
     return f"{int(math.floor(value)):04d}p{int(round((value - math.floor(value)) * 10)):01d}"
 
 
+def _load_ground_truth_contour(path: Path) -> np.ndarray:
+    contour = np.load(path, allow_pickle=False)
+    if contour.shape == (100,):
+        contour = contour.reshape(50, 2)
+    if contour.shape != (50, 2):
+        raise ValueError(f"Ground-truth contour must have shape (50, 2), got {contour.shape}: {path}")
+    if not np.isfinite(contour).all():
+        raise ValueError(f"Ground-truth contour contains non-finite coordinates: {path}")
+    return np.asarray(contour, dtype=np.float32)
+
+
+def build_ground_truth_timeline(
+    contour_dir: Path,
+    classes: list[str],
+    start_frame: float,
+    end_frame: float,
+    step: float,
+    max_frames: int | None,
+) -> list[dict[str, Any]]:
+    """Build a per-frame ground-truth timeline from contour files.
+
+    Integer frames are loaded directly. Fractional frames are linearly
+    interpolated from their two adjacent integer frames. Missing contours stay
+    missing and are reported per row; a contour from another frame is never
+    held or reused.
+    """
+    contour_dir = contour_dir.resolve()
+    if not contour_dir.is_dir():
+        raise FileNotFoundError(f"Ground-truth contour directory does not exist: {contour_dir}")
+    if not classes:
+        raise ValueError("Ground-truth timeline requires at least one contour class")
+    if not np.isfinite([start_frame, end_frame, step]).all():
+        raise ValueError("Ground-truth timeline bounds and step must be finite")
+    if step <= 0:
+        raise ValueError(f"Ground-truth timeline step must be positive, got {step}")
+    if end_frame < start_frame:
+        raise ValueError(f"Ground-truth end frame {end_frame} precedes start frame {start_frame}")
+
+    count = int(math.floor((end_frame - start_frame) / step + 1e-8)) + 1
+    if max_frames is not None:
+        if max_frames <= 0:
+            raise ValueError(f"max_frames must be positive, got {max_frames}")
+        count = min(count, max_frames)
+    frame_numbers = [round(start_frame + index * step, 6) for index in range(count)]
+
+    needed_integer_frames: set[int] = set()
+    for frame_number in frame_numbers:
+        needed_integer_frames.add(int(math.floor(frame_number)))
+        needed_integer_frames.add(int(math.ceil(frame_number)))
+
+    integer_cache: dict[int, list[np.ndarray | None]] = {}
+    integer_errors: dict[tuple[int, str], str] = {}
+    for integer_frame in sorted(needed_integer_frames):
+        frame_contours: list[np.ndarray | None] = []
+        for articulator in classes:
+            path = contour_dir / f"{integer_frame:04d}_{articulator}.npy"
+            if not path.is_file():
+                frame_contours.append(None)
+                integer_errors[(integer_frame, articulator)] = "file missing"
+                continue
+            try:
+                frame_contours.append(_load_ground_truth_contour(path))
+            except (OSError, ValueError) as error:
+                frame_contours.append(None)
+                integer_errors[(integer_frame, articulator)] = str(error)
+        integer_cache[integer_frame] = frame_contours
+
+    timeline: list[dict[str, Any]] = []
+    for frame_number in frame_numbers:
+        lower = int(math.floor(frame_number))
+        upper = int(math.ceil(frame_number))
+        alpha = float(frame_number - lower)
+        source = (
+            f"direct frame {lower:04d}"
+            if lower == upper
+            else f"linear interpolation {lower:04d}/{upper:04d} (alpha={alpha:g})"
+        )
+        contours: list[np.ndarray] = []
+        missing_contours: list[str] = []
+        missing_details: dict[str, str] = {}
+        for class_index, articulator in enumerate(classes):
+            lower_contour = integer_cache[lower][class_index]
+            upper_contour = integer_cache[upper][class_index]
+            if lower_contour is None or upper_contour is None:
+                contours.append(np.full((50, 2), np.nan, dtype=np.float32))
+                missing_contours.append(articulator)
+                reasons = []
+                if lower_contour is None:
+                    reasons.append(f"{lower:04d}: {integer_errors[(lower, articulator)]}")
+                if upper != lower and upper_contour is None:
+                    reasons.append(f"{upper:04d}: {integer_errors[(upper, articulator)]}")
+                missing_details[articulator] = "; ".join(reasons)
+            elif lower == upper:
+                contours.append(lower_contour)
+            else:
+                contours.append((1.0 - alpha) * lower_contour + alpha * upper_contour)
+        flattened = np.asarray(contours, dtype=np.float32).reshape(len(classes), 100)
+        timeline.append(
+            {
+                "frame_number": frame_number,
+                "frame": frame_token(frame_number),
+                "labels": flattened,
+                "mode_prediction": flattened,
+                "phoneme": "n/a",
+                "held": False,
+                "ground_truth_source": source,
+                "ground_truth_lower_frame": lower,
+                "ground_truth_upper_frame": upper,
+                "ground_truth_interpolation_alpha": alpha,
+                "missing_ground_truth_contours": missing_contours,
+                "missing_ground_truth_details": missing_details,
+            }
+        )
+    return timeline
+
+
 def aggregate_state(state: dict[str, Any], config: dict[str, Any], speaker: int, session: int) -> list[dict[str, Any]]:
     phonemes = load_phonemes(config)
     accum: dict[float, dict[str, Any]] = {}

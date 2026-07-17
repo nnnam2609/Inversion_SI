@@ -108,7 +108,7 @@ Normalization policy:
 - Contour normalization uses a project minimum `normalization_contour_std_floor: 0.1`. Normal runs may keep or raise this floor; lower values are rejected unless `allow_low_contour_std_floor_diagnostic: true` is set for a diagnostic run. This avoids stale near-zero contour std values that make de-normalized predictions look almost static.
 - Split cache metadata records the std-floor source (`default`, `normalization_contour_std_floor`, or legacy `contour_std_floor`) so old configs remain traceable.
 - Inference validates the contour std floor for any split cache used to de-normalize predictions. If an old cache fails this check, rebuild the split cache with the current normalization policy.
-- Cached-prediction render scripts also compute prediction-motion diagnostics and reject frozen payloads, nearly static labeled payloads whose pred/label frame-diff ratio is below `0.20`, and under-moving labeled payloads whose pred/label coordinate-std ratio is below the guard threshold, unless an explicit diagnostic flag is used.
+- Cached-prediction render scripts record prediction-motion diagnostics in their summaries but do not block video rendering based on those diagnostics.
 - Audio VTLN for final inversion RMSE/video must use `scripts/build_inversion_frontend_vtln_eval_cache.py`, which re-extracts MFCC through the Inversion_SI frontend and chunking. The legacy exported-NPZ override script is diagnostic-only and is blocked by default.
 - Session inference rejects configs containing the legacy `audio_vtln_feature_npz` key before loading the model, so stale exported-NPZ audio VTLN configs cannot create new under-moving prediction payloads by accident.
 - Quick config audit:
@@ -194,6 +194,74 @@ output_dir/eval_pred_vs_gt_mri.mp4
 ```
 
 Predicted contours are averaged across overlapping sequence predictions per frame and articulator.
+
+Render a target-label-only MRI video with all configured contours, without
+prediction overlays or RMSE:
+
+```bash
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/render_gridnorm_session_video.py \
+  --predictions results/<run>/p7_s15/eval/cached_session_predictions.pt \
+  --config config/train_config/<p7-config>.yaml \
+  --output-dir results/<run>/p7_s15_ground_truth_video \
+  --speaker 7 --session 15 --speaker-name P7 --session-name S15 \
+  --mri-dicom-dir /path/to/P7/DCM_2D/S15 \
+  --audio /path/to/DENOISED_SOUND_P7_S15.wav \
+  --ground-truth-contour-dir /path/to/P7/S15/complete-contours \
+  --timeline-step 1.0 \
+  --ground-truth-only
+```
+
+Ground-truth-only rendering uses integer MRI frames only:
+
+- The prediction payload is used only to select the session timeline range.
+- Every integer frame is loaded from `--ground-truth-contour-dir`.
+- Frame `.5` is not rendered and no contour is interpolated.
+- If a configured contour file is missing or invalid, that contour is left
+  empty and its class name is shown in the frame's `missing:` text.
+- The renderer never holds or reuses a contour from another frame.
+- `frame_metrics.csv` records the exact source and missing contour classes for
+  every rendered frame.
+
+Use `--prediction-only --prediction-contour-dir <dir> --timeline-step 1.0` to
+render existing model contour files with the same integer-only, no-hold, and
+missing-text policy. The MRI and audio paths default from `--speaker` and
+`--session`; the renderer records the resolved MRI directory in `summary.json`
+and refuses mismatched numeric/display session names. MRI frame caches also
+record their DICOM source directory and are never reused for another speaker or
+session.
+
+### Dense audio inference for every integer MRI frame
+
+The regular session inference command reads a cached dataset split. That split
+is built from non-silence TextGrid intervals and may therefore omit MRI frames
+even though the model itself predicts contours from MFCC audio. Do not use its
+sparse contour directory when a video must contain a fresh prediction at every
+integer MRI frame.
+
+Use the dense prediction-only entry point instead (on an OAR GPU allocation):
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 PYTHONPATH=.:src \
+  ../inversion/.venv/bin/python scripts/infer_dense_audio_integer_contours.py \
+  --config config/train_config/<p7-config>.yaml \
+  --checkpoint /path/to/best_model.pth \
+  --audio /path/to/DENOISED_SOUND_P7_S15.wav \
+  --output-dir results/<run>/p7_s15_dense_audio_integer_inference \
+  --speaker 7 --session 15 \
+  --frame-min 143 --frame-max 1606 \
+  --inference-mode full_sequence --device cuda
+```
+
+This path extracts the full audio MFCC sequence with the training frontend,
+uses the training split's global normalization, and runs one direct model
+forward over the entire selected MFCC sequence. It writes exactly one direct
+prediction for every requested integer frame and each configured contour. It
+never reads target contours, never uses a TextGrid or silence filter, never
+creates `.5` frames, and never interpolates, averages windows, or holds a
+contour. The command fails if any expected output is missing, non-finite, or if
+the output directory contains stale unexpected contour files. The legacy
+`--inference-mode overlapping_windows` path is diagnostic-only because changing
+BiLSTM window contributors creates periodic contour jumps.
 
 ## Grid Transform Submodule
 

@@ -154,7 +154,9 @@ def load_or_build_mri_cache(
     if cache_path.exists():
         cached = np.load(cache_path, allow_pickle=False)
         cached_frames = [int(value) for value in cached["frame_numbers"].tolist()]
-        if cached_frames == frame_numbers:
+        cached_source_dir = str(cached["source_dir"].item()) if "source_dir" in cached.files else None
+        requested_source_dir = str(dicom_dir.resolve())
+        if cached_frames == frame_numbers and cached_source_dir == requested_source_dir:
             images = cached["images"]
             return {frame_number: images[index] for index, frame_number in enumerate(cached_frames)}
 
@@ -193,7 +195,12 @@ def load_or_build_mri_cache(
     images = [images_by_frame[frame_number] for frame_number in frame_numbers]
     stack = np.stack(images, axis=0)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(cache_path, frame_numbers=np.array(frame_numbers, dtype=np.int32), images=stack)
+    np.savez(
+        cache_path,
+        frame_numbers=np.array(frame_numbers, dtype=np.int32),
+        images=stack,
+        source_dir=np.array(str(dicom_dir.resolve())),
+    )
     return {frame_number: stack[index] for index, frame_number in enumerate(frame_numbers)}
 
 

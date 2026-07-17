@@ -56,6 +56,8 @@ def write_mode_contours(rows: list[dict[str, Any]], classes: list[str], output_d
             continue
         pred = row["mode_prediction"].reshape(len(classes), 50, 2)
         for idx, name in enumerate(classes):
+            if not np.isfinite(pred[idx]).all():
+                continue
             np.save(output_dir / f"{row['frame']}_{name}.npy", pred[idx].astype(np.float32))
 
 

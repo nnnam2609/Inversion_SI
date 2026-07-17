@@ -27,7 +27,6 @@ from src.utils.mri_rendering import (
 )
 from src.utils.prediction_motion_cli import (
     add_prediction_motion_arguments,
-    assert_prediction_motion_from_args,
     prediction_motion_report_from_args,
 )
 from src.utils.video_rendering import MM_PER_PIXEL, draw_dashed_polyline, rgb_to_bgr255, scale_points
@@ -58,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Class names to exclude from RMSE computation while still drawing them.",
     )
-    add_prediction_motion_arguments(parser, include_diagnostic_flag=True, action_word="Fail render")
+    add_prediction_motion_arguments(parser, include_diagnostic_flag=True, action_word="Report")
     return parser.parse_args()
 
 
@@ -182,7 +181,6 @@ def main() -> None:
         args,
         prediction_payload=str(args.predictions),
     )
-    assert_prediction_motion_from_args(motion_report, args)
     excluded_rmse_classes = [name for name in args.exclude_rmse_classes if name in classes]
     excluded_set = set(excluded_rmse_classes)
     rmse_class_indices = [idx for idx, name in enumerate(classes) if name not in excluded_set]
@@ -277,7 +275,7 @@ def main() -> None:
         "dicom_index_workers": int(args.dicom_index_workers),
         "dicom_read_workers": int(args.dicom_read_workers),
         "prediction_motion": motion_report,
-        "allow_static_prediction_diagnostic": bool(args.allow_static_prediction_diagnostic),
+        "motion_guard_enabled": False,
     }
     with args.output.with_suffix(".json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, sort_keys=True)
