@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +18,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from src.model.baseline_5 import BaselineModel  # noqa: E402
+from src.utils import metrics  # noqa: E402
 from src.utils.config_validation import load_yaml_config  # noqa: E402
 from src.utils.normalization import TRAINING_SPLIT_CACHE_KEYS, load_validated_split_cache_state  # noqa: E402
 from src.utils.split_cache_overrides import SPLIT_FILES, split_cache_dir  # noqa: E402
@@ -32,6 +32,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-batch", type=int, default=4096)
     parser.add_argument("--min-batch", type=int, default=1)
     parser.add_argument("--output-config-dir", type=Path, default=None)
+    parser.add_argument(
+        "--smoke-epochs",
+        type=int,
+        default=0,
+        help="Run a separate from-scratch smoke training before the full run; 0 disables it.",
+    )
     parser.add_argument(
         "--preflight-only",
         action="store_true",
@@ -63,6 +69,32 @@ def resolve_output_config_dir(config: dict[str, Any], requested: Path | None) ->
 
 def auto_batch_suffix(selected_batch_size: int, gpus: int) -> str:
     return f"auto80_bs{int(selected_batch_size)}_{int(gpus)}gpu"
+
+
+def smoke_runtime_config(runtime_config: dict[str, Any], smoke_epochs: int) -> dict[str, Any]:
+    if smoke_epochs < 1:
+        raise ValueError("smoke_epochs must be >= 1")
+    smoke = dict(runtime_config)
+    suffix = f"smoke{int(smoke_epochs)}epoch"
+    for key in ("experiment_name", "folder_save", "model", "tag"):
+        smoke[key] = f"{runtime_config[key]}_{suffix}"
+    smoke["n_epochs"] = int(smoke_epochs)
+    smoke["save_every"] = 1
+    smoke["patience"] = max(1, min(int(runtime_config.get("patience", 1)), smoke_epochs))
+    smoke["smoke_parent_experiment"] = runtime_config["experiment_name"]
+    smoke["smoke_only"] = True
+    return smoke
+
+
+def run_training(config_path: Path, env: dict[str, str]) -> None:
+    command = [
+        sys.executable,
+        "src/main_train.py",
+        "--config",
+        str(config_path),
+    ]
+    print("+ " + " ".join(command), flush=True)
+    subprocess.run(command, cwd=REPO_ROOT, env=env, check=True)
 
 
 def audit_existing_split_caches(config: dict[str, Any]) -> dict[str, Any]:
@@ -138,12 +170,49 @@ def try_batch(config: dict[str, Any], batch_size: int, device: torch.device) -> 
         lengths = torch.full((batch_size,), sequence_length, dtype=torch.long, device=device)
         pred, _, _ = model(x, lengths)
         y = y[:, : pred.shape[1]]
-        loss = F.mse_loss(pred, y)
-        loss = loss + F.mse_loss((pred * std) + mean, (y * std) + mean)
+        # Match TrainSingle.train_batch, including metric-only allocations that
+        # remain live before the actual MSE backward pass. A plain MSE probe can
+        # substantially overestimate the safe batch for criterion_pearson.
+        loss = metrics.loss_mse(y, pred)
+        loss_rmse = metrics.loss_rmse(y, pred)
+        y_raw = (y * std) + mean
+        pred_raw = (pred * std) + mean
+        loss_rmse_raw = metrics.loss_rmse(y_raw, pred_raw)
+        loss_pearson = metrics.pearson_correlation(y, pred)
+        loss_criterion = metrics.criterion_both(
+            y,
+            pred,
+            90,
+            True,
+            int(device.index or 0),
+        )
+        # Force the same scalar materialization performed by TrainSingle.
+        _ = (
+            loss_rmse.item(),
+            loss_rmse_raw.item(),
+            loss_pearson.item(),
+            loss_criterion.item(),
+        )
         loss.backward()
         optimizer.step()
         peak = int(torch.cuda.max_memory_allocated(device))
-        del model, optimizer, x, y, std, mean, lengths, pred, loss
+        del (
+            model,
+            optimizer,
+            x,
+            y,
+            std,
+            mean,
+            lengths,
+            pred,
+            loss,
+            loss_rmse,
+            y_raw,
+            pred_raw,
+            loss_rmse_raw,
+            loss_pearson,
+            loss_criterion,
+        )
         clear_cuda()
         return True, peak, None
     except torch.cuda.OutOfMemoryError as exc:
@@ -197,6 +266,8 @@ def tune_batch_size(config: dict[str, Any], target_util: float, min_batch: int, 
 
 def main() -> None:
     args = parse_args()
+    if args.smoke_epochs < 0:
+        raise ValueError("--smoke-epochs must be >= 0")
     config_path = args.config.resolve()
     config = load_yaml(config_path)
     split_cache_preflight = audit_existing_split_caches(config)
@@ -229,14 +300,18 @@ def main() -> None:
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = ",".join(str(index) for index in range(args.gpus))
     env["PYTHONUNBUFFERED"] = "1"
-    command = [
-        sys.executable,
-        "src/main_train.py",
-        "--config",
-        str(runtime_config_path),
-    ]
-    print("+ " + " ".join(command), flush=True)
-    subprocess.run(command, cwd=REPO_ROOT, env=env, check=True)
+    if args.smoke_epochs:
+        smoke_config = smoke_runtime_config(runtime_config, args.smoke_epochs)
+        smoke_config_path = output_dir / f"{runtime_config_path.stem}_smoke{args.smoke_epochs}epoch.yaml"
+        save_yaml(smoke_config, smoke_config_path)
+        print(
+            f"smoke_training_start epochs={args.smoke_epochs} config={smoke_config_path}",
+            flush=True,
+        )
+        run_training(smoke_config_path, env)
+        print(f"smoke_training_passed config={smoke_config_path}", flush=True)
+    print(f"full_training_start from_scratch=true config={runtime_config_path}", flush=True)
+    run_training(runtime_config_path, env)
 
 
 if __name__ == "__main__":

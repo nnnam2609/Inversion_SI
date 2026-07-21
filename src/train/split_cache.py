@@ -20,11 +20,15 @@ from preprocessing.session_cache import (
     write_metadata,
 )
 from utils.normalization import (
+    NORMALIZATION_STD_POLICY_KEY,
+    RAW_POSITIVE_NORMALIZATION_STD_POLICY,
     TRAINING_SPLIT_CACHE_KEYS,
     apply_std_floor,
     load_validated_split_cache_state,
     normalization_floor_metadata,
+    normalization_std_policy,
     normalization_std_floors,
+    validate_raw_positive_std,
 )
 
 
@@ -196,7 +200,7 @@ def fit_normalization(
     fit_splits: Iterable[str],
     mode: str,
 ) -> Dict[str, Any]:
-    contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+    std_policy = normalization_std_policy(config)
 
     fit_features: List[np.ndarray] = []
     fit_contours: List[np.ndarray] = []
@@ -216,17 +220,27 @@ def fit_normalization(
     std_mfcc = np.mean(np.array([np.std(item, axis=0) for item in fit_features]), axis=0)
     mean_mfcc = np.mean(np.array([np.mean(item, axis=0) for item in fit_features]), axis=0)
 
+    std_contour = std_contour.reshape(len(config["classes"]), int(config["output_layer"]))
+    if std_policy == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+        used_std_contour = validate_raw_positive_std(
+            std_contour,
+            "contour",
+            classes=list(config["classes"]),
+            output_layer=int(config["output_layer"]),
+        ).astype(np.float32, copy=False)
+        used_std_mfcc = validate_raw_positive_std(std_mfcc, "mfcc").astype(np.float32, copy=False)
+    else:
+        contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+        used_std_contour = apply_std_floor(std_contour, contour_std_floor, np.float32)
+        used_std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor, np.float32)
+
     return {
         "normalization_mode": mode,
         "normalization_fit_splits": list(fit_splits),
         **normalization_floor_metadata(config),
-        "std_mfcc": apply_std_floor(std_mfcc, mfcc_std_floor, np.float32),
+        "std_mfcc": used_std_mfcc,
         "mean_mfcc": mean_mfcc.astype(np.float32),
-        "std_contour": apply_std_floor(
-            std_contour.reshape(len(config["classes"]), int(config["output_layer"])),
-            contour_std_floor,
-            np.float32,
-        ),
+        "std_contour": used_std_contour,
         "mean_contour": mean_contour.reshape(
             len(config["classes"]),
             int(config["output_layer"]),
@@ -371,6 +385,7 @@ def ensure_split_caches(config: Dict[str, Any]) -> Dict[str, Any]:
             if len(norm_stats["normalization_fit_splits"]) == 1
             else None
         ),
+        NORMALIZATION_STD_POLICY_KEY: norm_stats[NORMALIZATION_STD_POLICY_KEY],
         "normalization_contour_std_floor": norm_stats["normalization_contour_std_floor"],
         "normalization_mfcc_std_floor": norm_stats["normalization_mfcc_std_floor"],
         "normalization_contour_std_floor_source": norm_stats["normalization_contour_std_floor_source"],

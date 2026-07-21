@@ -137,10 +137,10 @@ def normalize_mri_frame(pixel_array: np.ndarray) -> np.ndarray:
 def needed_integer_frames(items: list[tuple[float, int, int]], frame_offset: int) -> list[int]:
     needed: set[int] = set()
     for frame_number, _, _ in items:
-        lower = math.floor(frame_number)
-        upper = math.ceil(frame_number)
-        needed.add(int(lower) + frame_offset)
-        needed.add(int(upper) + frame_offset)
+        rounded = int(round(frame_number))
+        if not math.isclose(frame_number, rounded, rel_tol=0.0, abs_tol=1e-4):
+            raise ValueError(f"NEVER render fractional MRI frame {frame_number}")
+        needed.add(rounded + frame_offset)
     return sorted(needed)
 
 
@@ -244,10 +244,7 @@ def load_or_build_npy_mri_cache(
 
 
 def mri_for_frame(frame_number: float, frame_offset: int, cache: dict[int, np.ndarray]) -> np.ndarray:
-    lower = int(math.floor(frame_number)) + frame_offset
-    upper = int(math.ceil(frame_number)) + frame_offset
-    if lower == upper:
-        return cache[lower]
-    alpha = float(frame_number - math.floor(frame_number))
-    blended = (1.0 - alpha) * cache[lower].astype(np.float32) + alpha * cache[upper].astype(np.float32)
-    return np.round(blended).astype(np.uint8)
+    rounded = int(round(frame_number))
+    if not math.isclose(frame_number, rounded, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER render fractional MRI frame {frame_number}")
+    return cache[rounded + frame_offset]

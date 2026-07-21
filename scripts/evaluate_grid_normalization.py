@@ -105,9 +105,9 @@ def decode_phoneme(row: torch.Tensor, phonemes: list[str]) -> str:
 
 def frame_token(value: float) -> str:
     rounded = int(round(value))
-    if abs(value - rounded) < 1e-4:
-        return f"{rounded:04d}"
-    return f"{int(math.floor(value)):04d}p{int(round((value - math.floor(value)) * 10)):01d}"
+    if not math.isclose(value, rounded, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER score or report fractional frame {value}")
+    return f"{rounded:04d}"
 
 
 def load_anchor_grid(anchor: str, vtln_dir: Path):
@@ -280,7 +280,10 @@ def aggregate_payload(
                 continue
             if sessions is not None and ses not in sessions:
                 continue
-            token = frame_token(float(frame[2]))
+            frame_number = float(frame[2])
+            if not math.isclose(frame_number, round(frame_number), rel_tol=0.0, abs_tol=1e-4):
+                continue
+            token = frame_token(frame_number)
             key = (spk, ses, token)
             item = accum.setdefault(
                 key,

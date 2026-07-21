@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--speaker", required=True, help="Numeric speaker id in cached frame ids, e.g. 2 for P2")
     parser.add_argument("--session", required=True, help="Numeric session id in cached frame ids, e.g. 1 for S1")
     parser.add_argument("--split", default="test_sequences", choices=("train_sequences", "valid_sequences", "test_sequences"))
+    parser.add_argument(
+        "--split-cache-path",
+        type=Path,
+        default=None,
+        help="Optional explicit split cache, useful for cross-dataset evaluation without changing the training config.",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
     parser.add_argument("--skip-predictions", action="store_true", help="Do not write the large prediction tensor artifact.")
@@ -198,9 +204,9 @@ def rmse_class_mask(config: dict[str, Any], excluded_classes: list[str], device:
 
 def frame_token(value: float) -> str:
     rounded = int(round(value))
-    if abs(value - rounded) < 1e-4:
-        return f"{rounded:04d}"
-    return f"{int(np.floor(value)):04d}p{int(round((value - np.floor(value)) * 10)):01d}"
+    if not np.isclose(value, rounded, atol=1e-4):
+        raise ValueError(f"NEVER save fractional contour frame {value}")
+    return f"{rounded:04d}"
 
 
 def contour_array(values: np.ndarray, output_format: str) -> np.ndarray:
@@ -224,6 +230,7 @@ def write_predicted_contours(
     accum: dict[tuple[str, str], list[np.ndarray]] = {}
     predicted_cpu = predicted_raw.detach().cpu().numpy()
     classes = list(config["classes"])
+    discarded_fractional_rows = 0
     for seq_idx in range(predicted_cpu.shape[0]):
         length = int(lengths[seq_idx].item())
         for frame_offset in range(length):
@@ -232,7 +239,11 @@ def write_predicted_contours(
             frame_session = int(round(float(frame[1])))
             if frame_speaker != speaker or frame_session != session:
                 continue
-            frame_name = frame_token(float(frame[2]))
+            frame_number = float(frame[2])
+            if not np.isclose(frame_number, round(frame_number), atol=1e-4):
+                discarded_fractional_rows += 1
+                continue
+            frame_name = frame_token(frame_number)
             for class_idx, class_name in enumerate(classes):
                 accum.setdefault((frame_name, class_name), []).append(predicted_cpu[seq_idx, frame_offset, class_idx])
 
@@ -248,6 +259,9 @@ def write_predicted_contours(
         "num_unique_frames": len({key[0] for key in accum}),
         "classes": classes,
         "averaged_overlapping_predictions": True,
+        "frame_policy": "NEVER save fractional contour frames; integer frames only",
+        "discarded_fractional_rows": discarded_fractional_rows,
+        "saved_fractional_frame_count": 0,
     }
     with (output_dir / "manifest.json").open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
@@ -261,7 +275,7 @@ def main() -> None:
     if args.prediction_only and args.prediction_denorm_cache is not None:
         raise ValueError("--prediction-denorm-cache is for compare/metric mode, not --prediction-only")
     config = load_config(args.config)
-    cache_path = split_cache_path(config, args.split)
+    cache_path = args.split_cache_path or split_cache_path(config, args.split)
     state, cache_floor_summary = load_validated_split_cache_state(
         cache_path,
         config,
@@ -352,6 +366,7 @@ def main() -> None:
         torch.save(prediction_payload, predictions_path)
 
     rows = []
+    fractional_input_rows_excluded_from_metrics = 0
     for seq_idx, source_idx in enumerate(indices):
         length = int(lengths[seq_idx].item())
         for frame_offset in range(length):
@@ -360,11 +375,15 @@ def main() -> None:
             frame_session = int(round(float(frame[1])))
             if frame_speaker != speaker or frame_session != session:
                 continue
+            frame_number = float(frame[2])
+            if not np.isclose(frame_number, round(frame_number), atol=1e-4):
+                fractional_input_rows_excluded_from_metrics += 1
+                continue
             phoneme = decode_phoneme(phoneme_vectors[seq_idx, frame_offset, 0], phonemes)
             rows.append(
                 {
                     "source_index": source_idx,
-                    "frame": f"{frame_speaker}_S{frame_session}_{float(frame[2]):.1f}",
+                    "frame": f"{frame_speaker}_S{frame_session}_{frame_number:.1f}",
                     "phoneme": phoneme,
                     "rmse_raw": None
                     if per_frame_rmse is None
@@ -413,6 +432,9 @@ def main() -> None:
         "device": str(device),
         "num_sequences": len(indices),
         "num_frames": len(rows),
+        "fractional_input_rows_excluded_from_metrics": fractional_input_rows_excluded_from_metrics,
+        "fractional_scored_rows": 0,
+        "fractional_saved_rows": 0 if contour_manifest is None else contour_manifest["saved_fractional_frame_count"],
         "mean_rmse_raw": mean_rmse_raw,
         "mean_rmse_mm": mean_rmse_mm,
         "prediction_only": bool(args.prediction_only),

@@ -11,6 +11,9 @@ import torch
 DEFAULT_CONTOUR_STD_FLOOR = 0.1
 DEFAULT_MFCC_STD_FLOOR = 1e-8
 MIN_CONTOUR_STD_FLOOR = DEFAULT_CONTOUR_STD_FLOOR
+NORMALIZATION_STD_POLICY_KEY = "normalization_std_policy"
+DEFAULT_NORMALIZATION_STD_POLICY = "floor"
+RAW_POSITIVE_NORMALIZATION_STD_POLICY = "raw_positive"
 CONTOUR_STD_FLOOR_KEY = "normalization_contour_std_floor"
 MFCC_STD_FLOOR_KEY = "normalization_mfcc_std_floor"
 LEGACY_CONTOUR_STD_FLOOR_KEY = "contour_std_floor"
@@ -53,8 +56,62 @@ def _configured_floor(config: dict[str, Any], key: str, legacy_key: str, default
     return float(default), "default"
 
 
+def normalization_std_policy(config: dict[str, Any]) -> str:
+    """Return the std scaling policy while preserving the historical default."""
+    policy = str(config.get(NORMALIZATION_STD_POLICY_KEY, DEFAULT_NORMALIZATION_STD_POLICY)).lower()
+    if policy not in {DEFAULT_NORMALIZATION_STD_POLICY, RAW_POSITIVE_NORMALIZATION_STD_POLICY}:
+        raise ValueError(
+            f"Unsupported {NORMALIZATION_STD_POLICY_KEY}={policy!r}; expected "
+            f"{DEFAULT_NORMALIZATION_STD_POLICY!r} or {RAW_POSITIVE_NORMALIZATION_STD_POLICY!r}"
+        )
+    return policy
+
+
+def validate_raw_positive_std(
+    values: Any,
+    value_name: str,
+    *,
+    classes: list[str] | tuple[str, ...] | None = None,
+    output_layer: int | None = None,
+) -> np.ndarray:
+    """Validate an unfloored fitted std and report every bad feature/coordinate."""
+    array = np.asarray(values)
+    invalid = ~np.isfinite(array) | (array <= 0)
+    if not np.any(invalid):
+        return array
+
+    details = []
+    for index in np.argwhere(invalid)[:50]:
+        index_tuple = tuple(int(value) for value in index.tolist())
+        value = array[index_tuple]
+        if value_name == "contour" and classes is not None and output_layer is not None:
+            flat_index = int(np.ravel_multi_index(index_tuple, array.shape))
+            class_index, coordinate_index = divmod(flat_index, int(output_layer))
+            class_name = classes[class_index] if class_index < len(classes) else f"class_{class_index}"
+            details.append(
+                {
+                    "class_index": class_index,
+                    "class_name": class_name,
+                    "coordinate_index": coordinate_index,
+                    "value": float(value),
+                }
+            )
+        else:
+            details.append({"feature_index": index_tuple, "value": float(value)})
+    raise ValueError(
+        f"Raw fitted {value_name} std contains {int(invalid.sum())} non-finite or non-positive "
+        f"values; first_bad={details}. No std floor was applied."
+    )
+
+
 def normalization_std_floors(config: dict[str, Any]) -> tuple[float, float]:
     """Return the project std floors, rejecting contour floors that can freeze motion."""
+    policy = normalization_std_policy(config)
+    if policy == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+        raise ValueError(
+            f"{NORMALIZATION_STD_POLICY_KEY}={policy!r} has no std floors; "
+            "validate and use the raw fitted std instead"
+        )
     contour_std_floor, _ = _configured_floor(
         config,
         CONTOUR_STD_FLOOR_KEY,
@@ -85,6 +142,17 @@ def normalization_std_floors(config: dict[str, Any]) -> tuple[float, float]:
 
 
 def normalization_floor_metadata(config: dict[str, Any]) -> dict[str, Any]:
+    policy = normalization_std_policy(config)
+    if policy == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+        return {
+            NORMALIZATION_STD_POLICY_KEY: policy,
+            CONTOUR_STD_FLOOR_KEY: None,
+            MFCC_STD_FLOOR_KEY: None,
+            "normalization_contour_std_floor_source": "disabled_raw_positive",
+            "normalization_mfcc_std_floor_source": "disabled_raw_positive",
+            "normalization_used_legacy_std_floor_key": False,
+            "normalization_low_contour_std_floor_diagnostic": False,
+        }
     contour_std_floor, contour_source = _configured_floor(
         config,
         CONTOUR_STD_FLOOR_KEY,
@@ -99,6 +167,7 @@ def normalization_floor_metadata(config: dict[str, Any]) -> dict[str, Any]:
     )
     normalization_std_floors(config)
     return {
+        NORMALIZATION_STD_POLICY_KEY: policy,
         CONTOUR_STD_FLOOR_KEY: contour_std_floor,
         MFCC_STD_FLOOR_KEY: mfcc_std_floor,
         "normalization_contour_std_floor_source": contour_source,
@@ -129,15 +198,30 @@ def summarize_contour_std_floor(
 ) -> dict[str, Any]:
     if "std" not in state:
         raise KeyError(f"Split cache must contain contour std tensor: {cache_path}")
-    contour_std_floor, _ = normalization_std_floors(config)
     std = state["std"]
     if not isinstance(std, torch.Tensor):
         std = torch.as_tensor(std)
     min_std = float(std.float().min().item())
     metadata = cache_metadata or {}
+    policy = normalization_std_policy(config)
+    if policy == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+        finite = bool(torch.isfinite(std).all().item())
+        positive = bool((std > 0).all().item())
+        return {
+            NORMALIZATION_STD_POLICY_KEY: policy,
+            CONTOUR_STD_FLOOR_KEY: None,
+            "cache_normalization_contour_std_floor": metadata.get(CONTOUR_STD_FLOOR_KEY),
+            "cache_contour_std_min": min_std,
+            "cache_contour_std_floor_ok": bool(finite and positive),
+            "cache_contour_std_raw_positive_ok": bool(finite and positive),
+            "cache_contour_std_all_finite": finite,
+            "normalization_contour_std_floor_source": "disabled_raw_positive",
+        }
+    contour_std_floor, _ = normalization_std_floors(config)
     metadata_floor = metadata.get(CONTOUR_STD_FLOOR_KEY)
     floor_ok = min_std + tolerance >= contour_std_floor
     return {
+        NORMALIZATION_STD_POLICY_KEY: policy,
         CONTOUR_STD_FLOOR_KEY: contour_std_floor,
         "cache_normalization_contour_std_floor": metadata_floor,
         "cache_contour_std_min": min_std,
@@ -156,6 +240,13 @@ def validate_contour_std_floor(
 ) -> dict[str, Any]:
     summary = summarize_contour_std_floor(state, config, cache_path, cache_metadata)
     if not summary["cache_contour_std_floor_ok"]:
+        if summary.get(NORMALIZATION_STD_POLICY_KEY) == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+            raise RuntimeError(
+                "Split cache contour std must be finite and strictly positive under "
+                f"{NORMALIZATION_STD_POLICY_KEY}={RAW_POSITIVE_NORMALIZATION_STD_POLICY}. "
+                f"cache={cache_path} min_std={summary['cache_contour_std_min']:.8g}. "
+                "No std floor was applied."
+            )
         raise RuntimeError(
             "Split cache contour std is below the configured normalization floor. "
             "This can make predicted contours look under-moving after denormalization. "

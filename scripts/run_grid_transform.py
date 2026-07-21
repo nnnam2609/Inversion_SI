@@ -6,10 +6,22 @@ import sys
 from pathlib import Path
 
 
+def default_python_bin(repo_root: Path) -> Path:
+    shared_venv = repo_root.parent / "inversion" / ".venv"
+    candidates = (
+        shared_venv / "Scripts" / "python.exe",
+        shared_venv / "bin" / "python",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return Path(sys.executable)
+
+
 def main(argv: list[str]) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     grid_transform_root = repo_root / "external" / "grid-transform"
-    python_bin = os.environ.get("PYTHON_BIN", str(repo_root / ".." / "inversion" / ".venv" / "bin" / "python"))
+    python_bin = os.environ.get("PYTHON_BIN", str(default_python_bin(repo_root)))
 
     if not argv:
         print("Usage: scripts/run_grid_transform.py <scripts/run/*.py> [args...]", file=sys.stderr)

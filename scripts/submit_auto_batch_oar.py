@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-util", type=float, default=0.80)
     parser.add_argument("--max-batch", type=int, default=4096)
     parser.add_argument("--min-batch", type=int, default=1)
+    parser.add_argument("--smoke-epochs", type=int, default=0)
     parser.add_argument("--walltime", default="02:00:00")
     parser.add_argument("--queue", default="production")
     parser.add_argument("--cluster", default=None, help="Optional OAR cluster constraint, e.g. gres or gruss.")
@@ -96,6 +97,8 @@ def train_auto_batch_command(args: argparse.Namespace) -> list[str]:
     ]
     if args.output_config_dir is not None:
         command.extend(["--output-config-dir", str(args.output_config_dir.resolve())])
+    if args.smoke_epochs:
+        command.extend(["--smoke-epochs", str(args.smoke_epochs)])
     return command
 
 
@@ -183,6 +186,7 @@ def main() -> None:
         "target_util": args.target_util,
         "max_batch": args.max_batch,
         "min_batch": args.min_batch,
+        "smoke_epochs": args.smoke_epochs,
         "queue": args.queue,
         "cluster": args.cluster,
         "walltime": args.walltime,

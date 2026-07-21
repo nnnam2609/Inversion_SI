@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vtln-dir", type=Path, default=DEFAULT_VTLN_DIR)
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--ms-image", type=float, default=None)
-    parser.add_argument("--timeline-step", type=float, default=0.5)
+    parser.add_argument("--timeline-step", type=float, default=1.0)
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--reference-vowel", default="i")
     parser.add_argument("--reference-frame", default="0589")
@@ -409,6 +409,8 @@ def make_comparison_frame(
 
 def main() -> None:
     args = parse_args()
+    if not math.isclose(float(args.timeline_step), 1.0, rel_tol=0.0, abs_tol=1e-8):
+        raise RuntimeError("NEVER render fractional frames; use --timeline-step 1.0")
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(args.config, allow_legacy_audio_vtln=args.allow_legacy_audio_vtln)

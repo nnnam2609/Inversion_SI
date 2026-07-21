@@ -78,3 +78,4 @@ torchinfo==1.8.0
 imageio==2.37.2
 roifile==2024.9.15
 shapely==2.0.7
+pydicom==2.4.4

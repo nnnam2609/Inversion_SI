@@ -39,6 +39,18 @@ cd /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhan
 ../inversion/.venv/bin/python --version
 ```
 
+On the Windows workspace, reuse the corresponding shared environment and add
+the grid-transform runtime packages pinned by this repo:
+
+```powershell
+cd C:\Users\nhnguyen\PhD_A2A\Inversion_SI
+..\inversion\.venv\Scripts\python.exe -m pip install imageio==2.37.2 roifile==2024.9.15 shapely==2.0.7 pydicom==2.4.4
+..\inversion\.venv\Scripts\python.exe scripts\run_grid_transform.py run_create_speaker_grid.py --help
+```
+
+`scripts/run_grid_transform.py` selects `Scripts/python.exe` on Windows and
+`bin/python` on Linux. `PYTHON_BIN` still overrides that selection.
+
 GPU training and GPU inference should run inside an OAR GPU allocation on Grid5000.
 CPU-only config inspection and light preprocessing checks can run on the login node.
 
@@ -230,15 +242,31 @@ and refuses mismatched numeric/display session names. MRI frame caches also
 record their DICOM source directory and are never reused for another speaker or
 session.
 
-### Dense audio inference for every integer MRI frame
+For a strictly label-free prediction render, also pass an explicit integer
+range:
 
-The regular session inference command reads a cached dataset split. That split
-is built from non-silence TextGrid intervals and may therefore omit MRI frames
-even though the model itself predicts contours from MFCC audio. Do not use its
-sparse contour directory when a video must contain a fresh prediction at every
-integer MRI frame.
+```bash
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/render_gridnorm_session_video.py \
+  --config config/train_config/<p7-config>.yaml \
+  --output-dir results/<run>/p7_s15_prediction_video \
+  --speaker 7 --session 15 --speaker-name P7 --session-name S15 \
+  --prediction-only --prediction-contour-dir results/<run>/predicted_contours \
+  --frame-min 143 --frame-max 1606 --timeline-step 1.0
+```
 
-Use the dense prediction-only entry point instead (on an OAR GPU allocation):
+With `--frame-min/--frame-max`, the renderer does not load a cached
+prediction/label payload. It reads only the requested contour files, MRI
+frames, audio, and class/config metadata. Missing contour files stay empty and
+are listed as `missing:`; they are never interpolated or held.
+
+### Direct non-overlapping P7/S15 inference
+
+Use the prediction-only entry point with the same temporal contract as the
+classic inversion pipeline: TextGrid tier-0 intervals define independent
+speech sequences, each sequence is split into non-overlapping chunks no longer
+than the training `sequence_length`, and every chunk is forwarded with its
+actual length. The TextGrid supplies boundaries/silence only; target contours
+are never loaded.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 PYTHONPATH=.:src \
@@ -246,22 +274,26 @@ CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 PYTHONPATH=.:src \
   --config config/train_config/<p7-config>.yaml \
   --checkpoint /path/to/best_model.pth \
   --audio /path/to/DENOISED_SOUND_P7_S15.wav \
-  --output-dir results/<run>/p7_s15_dense_audio_integer_inference \
+  --textgrid /path/to/TEXT_ALIGNMENT_P7_S15.textgrid \
+  --output-dir results/<run>/p7_s15_direct_chunks \
   --speaker 7 --session 15 \
   --frame-min 143 --frame-max 1606 \
-  --inference-mode full_sequence --device cuda
+  --inference-mode legacy_interval_chunks \
+  --window-size 80 --batch-size 1 --device cuda
 ```
 
-This path extracts the full audio MFCC sequence with the training frontend,
-uses the training split's global normalization, and runs one direct model
-forward over the entire selected MFCC sequence. It writes exactly one direct
-prediction for every requested integer frame and each configured contour. It
-never reads target contours, never uses a TextGrid or silence filter, never
-creates `.5` frames, and never interpolates, averages windows, or holds a
-contour. The command fails if any expected output is missing, non-finite, or if
-the output directory contains stale unexpected contour files. The legacy
-`--inference-mode overlapping_windows` path is diagnostic-only because changing
-BiLSTM window contributors creates periodic contour jumps.
+The script selects one MFCC nearest each integer MRI-frame center inside the
+selected speech intervals, applies the training split's global normalization,
+forwards every max-80 chunk independently, and concatenates the outputs
+directly. With `--batch-size 1`, one model call corresponds to one chunk and
+the final short chunk uses its real length. There is no overlap averaging,
+interpolation, `.5` frame, or contour hold. Frames outside the selected
+intervals get no contour files and the label-free renderer reports them as
+`missing:`.
+
+`full_sequence` and `overlapping_windows` remain diagnostic modes. The former
+changes the recurrent context far beyond the training length; the latter
+creates contributor-change seams by averaging overlapping BiLSTM windows.
 
 ## Grid Transform Submodule
 

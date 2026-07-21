@@ -82,11 +82,15 @@ def make_items(state: dict[str, Any], max_frames: int | None) -> list[tuple[floa
         length = int(lengths[seq_idx])
         for offset in range(length):
             frame = frames[seq_idx, offset].detach().cpu().numpy()
+            frame_number = float(frame[2])
+            rounded_frame = int(round(frame_number))
+            if not math.isclose(frame_number, rounded_frame, rel_tol=0.0, abs_tol=1e-4):
+                continue
             label = tuple(float(x) for x in frame.tolist())
             if label in seen:
                 continue
             seen.add(label)
-            items.append((float(frame[2]), seq_idx, offset))
+            items.append((float(rounded_frame), seq_idx, offset))
     items.sort(key=lambda item: item[0])
     if max_frames is not None:
         return items[: max(1, int(max_frames))]
@@ -276,6 +280,8 @@ def main() -> None:
         "dicom_read_workers": int(args.dicom_read_workers),
         "prediction_motion": motion_report,
         "motion_guard_enabled": False,
+        "frame_policy": "NEVER render fractional MRI frames; integer frames only",
+        "rendered_fractional_frame_count": 0,
     }
     with args.output.with_suffix(".json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, sort_keys=True)
