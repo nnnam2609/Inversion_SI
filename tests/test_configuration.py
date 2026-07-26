@@ -1,4 +1,8 @@
+"""Regression tests for the configuration domain."""
+
 from __future__ import annotations
+
+# --- Consolidated from test_config_validation.py ---
 
 import subprocess
 import sys
@@ -72,7 +76,6 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertIn('"num_errors": 1', result.stdout)
         self.assertIn('"num_legacy_audio_vtln": 1', result.stdout)
         self.assertIn('"legacy_audio_vtln": true', result.stdout)
-
     def test_training_read_datas_uses_validated_config_loader(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "bad_train.yaml"
@@ -129,7 +132,3 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertIn('"num_errors": 0', result.stdout)
         self.assertIn('"num_legacy_audio_vtln": 1', result.stdout)
         self.assertIn('"legacy_audio_vtln": true', result.stdout)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -76,3 +76,26 @@ The refactor is accepted only when:
 - the full unit regression suite passes.
 
 No training, inference, or GPU evaluation is part of this source-only refactor.
+
+## Test layout
+
+The 116 regression tests are consolidated into eight domain files so the test
+root stays readable without dropping coverage:
+
+```text
+tests/
+├── test_adaptation.py
+├── test_common.py
+├── test_configuration.py
+├── test_inference.py
+├── test_normalization.py
+├── test_orchestration.py
+├── test_preprocessing.py
+└── test_rendering.py
+```
+
+Run all domains with:
+
+```bash
+../inversion/.venv/bin/python -m unittest discover -s tests -q
+```

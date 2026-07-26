@@ -1,4 +1,8 @@
+"""Regression tests for the preprocessing domain."""
+
 from __future__ import annotations
+
+# --- Consolidated from test_build_asd2_vtln_incisor_cache.py ---
 
 import json
 import sys
@@ -117,7 +121,3 @@ class BuildAsd2VtlnIncisorCacheTests(unittest.TestCase):
             marker = json.loads((target / "markers/1775/S6.json").read_text(encoding="utf-8"))
             self.assertEqual(marker["num_half_rows"], 1)
             self.assertEqual(marker["num_integer_rows"], 2)
-
-
-if __name__ == "__main__":
-    unittest.main()
