@@ -69,7 +69,10 @@ DEFAULT_PREDICTIONS = (
     REPO_ROOT
     / "results/p7_ref_bf_vtlnc_to_p2_s1s3_gridnorm_20260705_170122/unseen_baseline/P2_S1/eval/cached_session_predictions.pt"
 )
-DEFAULT_CONFIG = REPO_ROOT / "config/train_config/asd1_p7_seen_trainstats_p2_s1s3_unseen_eval_st5_mfcc.yaml"
+DEFAULT_CONFIG = (
+    REPO_ROOT
+    / "config/inference_config/asd1_p7_seen_trainstats_p2_s1s3_unseen_eval_st5_mfcc.yaml"
+)
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "results/p7_ref_bf_vtlnc_to_p2_s1_video_review_20260705"
 DEFAULT_VTLN_DIR = WORKSPACE_ROOT / "_downloads/grid-transform-vtln/vtln-data-v0.1.14/extracted/VTLN/data"
 

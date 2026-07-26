@@ -337,22 +337,19 @@ Current environment note:
 
 ## Current Reference Configs
 
-ASD1:
+`config/train_config/` intentionally contains only five canonical training
+setups:
 
 ```text
-config/preprocess_config/asd1_11contour_sessions.yaml
-config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml
-config/inference_config/asd1_11contour_trainnorm_p2_s1_video.yaml
+asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml
+asd1_p7_only_train_global_pooledraw_st5_mfcc_500epoch_fixedbs10_2gpu_20260723.yaml
+asd1_p7_seen_trainvaltest_paper_st5_mfcc_500epoch_stdfloor01.yaml
+asd2_11contour_sofiane153_s25_bfincisor_train_global_st5_mfcc_500epoch.yaml
+asd2_11contour_vtln_lowerrepairv2_upperlegacypos_20260721_train_global_rawstd_st5_mfcc_500epoch_fixedbs10_4gpu.yaml
 ```
 
-ASD2:
-
-```text
-config/preprocess_config/asd2_11contour_full_sessions.yaml
-config/preprocess_config/asd2_11contour_original_incisor_only_sessions.yaml
-config/train_config/asd2_11contour_full_preprocessed_paper_st5_mfcc_500epoch.yaml
-config/train_config/asd2_11contour_original_incisor_only_paper_st5_mfcc_500epoch.yaml
-```
+Evaluation-only YAML belongs in `config/inference_config/`; preprocessing
+overrides belong in `config/preprocess_config/`.
 
 ## Git Hygiene
 

@@ -543,7 +543,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default=str(REPO_ROOT / "config/train_config/asd2_full_single_task5_2gpu_grele_2epoch.yaml"),
+        default=str(
+            REPO_ROOT
+            / "config/train_config/"
+            "asd2_11contour_vtln_lowerrepairv2_upperlegacypos_20260721_"
+            "train_global_rawstd_st5_mfcc_500epoch_fixedbs10_4gpu.yaml"
+        ),
         help="Training YAML to use as source of truth.",
     )
     parser.add_argument(

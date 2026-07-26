@@ -27,7 +27,12 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = REPO_ROOT.parent
-DEFAULT_CONFIG = REPO_ROOT / "config/train_config/asd2_11contour_full_preprocessed_paper_st5_mfcc_500epoch.yaml"
+DEFAULT_CONFIG = (
+    REPO_ROOT
+    / "config/train_config/"
+    "asd2_11contour_vtln_lowerrepairv2_upperlegacypos_20260721_"
+    "train_global_rawstd_st5_mfcc_500epoch_fixedbs10_4gpu.yaml"
+)
 DEFAULT_SOURCE_CACHE = REPO_ROOT / "cache"
 DEFAULT_TARGET_CACHE = REPO_ROOT / "cache_variants/asd2_11_vtln_20260719"
 DEFAULT_INCISOR_ROOT = WORKSPACE_ROOT / "bf/inference"
