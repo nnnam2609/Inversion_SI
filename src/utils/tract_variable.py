@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from utils.colors import COLORS
+from src.utils.colors import COLORS
 from sklearn.decomposition import PCA
 
 

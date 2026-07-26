@@ -8,7 +8,9 @@ LEGACY_AUDIO_VTLN_CONFIG_KEY = "audio_vtln_feature_npz"
 INVERSION_FRONTEND_VTLN_CONFIG_KEY = "inversion_frontend_vtln_cache_metadata"
 LEGACY_AUDIO_VTLN_METHOD = "legacy_audio_vtln_npz_diagnostic"
 INVERSION_FRONTEND_VTLN_METHOD = "inversion_frontend_vtln"
-INVERSION_FRONTEND_VTLN_SCRIPT = "scripts/build_inversion_frontend_vtln_eval_cache.py"
+INVERSION_FRONTEND_VTLN_SCRIPT = (
+    "scripts/inversion_si.py preprocess vtln-cache"
+)
 
 LEGACY_AUDIO_VTLN_WARNING = (
     "Legacy NPZ-feature override: exported audio-normalization NPZ features may "

@@ -2,14 +2,14 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.train.train_single import TrainSingle
-from utils.read_yaml import read_datas
-from utils.datasets import read_dataset_train
-from utils.ddp import ddp_setup
+from src.utils.read_yaml import read_datas
+from src.utils.datasets import read_dataset_train
+from src.utils.ddp import ddp_setup
 import torch
 import mlflow
 import mlflow.pytorch
 import torch.multiprocessing as mp
-from utils.experiment_loader import  prepare_experiment, create_mlflow_experiment, get_run_id_by_name, extract_experiment_and_run_name
+from src.utils.experiment_loader import  prepare_experiment, create_mlflow_experiment, get_run_id_by_name, extract_experiment_and_run_name
 import numpy as np
 
 
@@ -37,7 +37,7 @@ def print_batch_memory(batch):
     print(f"---\nMémoire totale estimée : {total_mb:.2f} MB")
     return total_mb
 
-def main(rank: int, world_size: int, config:dict, model_type: str, phonemes_arg: str= None, autoencoder_arg: str= None, checkpoint_path: str= None )-> None:
+def train_worker(rank: int, world_size: int, config:dict, model_type: str, phonemes_arg: str= None, autoencoder_arg: str= None, checkpoint_path: str= None )-> None:
     """
     Main function to initialize the distributed training setup, load datasets, select the appropriate training class,
     and start the training process using MLflow for logging.
@@ -126,14 +126,20 @@ def main(rank: int, world_size: int, config:dict, model_type: str, phonemes_arg:
         else :
             trainer.train()
     
-if __name__ == "__main__":
-    
+def main() -> int:
+    """Parse the training CLI and launch one worker per visible GPU."""
+
     config, phonemes_arg, autoencoder_arg, model_type, checkpoint_path = read_datas()
     if not checkpoint_path:
         create_mlflow_experiment(config)
     world_size = torch.cuda.device_count()
     if world_size <= 0:
         raise RuntimeError("No CUDA GPU is visible to PyTorch; run training inside an OAR GPU allocation with CUDA devices exposed.")
-    mp.spawn(main, args=(world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path), nprocs=world_size)
+    mp.spawn(train_worker, args=(world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path), nprocs=world_size)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
     #dist.destroy_process_group()
     

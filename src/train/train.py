@@ -15,10 +15,10 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torchinfo import summary
 from tabulate import tabulate
-import psutil
 import gc
 from datetime import datetime
 from pathlib import Path
+from src.common.resources import log_process_memory
 
 
 class Train:
@@ -200,19 +200,13 @@ class Train:
                 raise RuntimeError("Test plotting is not included in the minimal ST-5 branch.")
             mlflow.end_run()
 
-    def process_batch(self, batch):
-        """
-        Abstract method to process each batch. To be implemented in subclasses.
-        """
+    def _unsupported_batch(self, batch):
+        """Abstract hook shared by the two subclass batch entry points."""
         raise NotImplementedError
 
-    
-    def test_batch(self, batch):
-        """
-        Abstract method to process each batch. To be implemented in subclasses.
-        """
-        raise NotImplementedError
-   
+    process_batch = _unsupported_batch
+    test_batch = _unsupported_batch
+
     def _log_metrics(self, mlflow, state, epoch, loss, unormalized, mse, pearson, criterion, phonemes):
         """
         Log training metrics using MLFlow.
@@ -486,7 +480,10 @@ class Train:
             "linked_artifacts": linked_files,
             "post_train_inference": {
                 "status": "not_run_by_train_loop",
-                "note": "Use scripts/infer_session.py with this best_model path; inference outputs can be placed under this results_dir.",
+                "note": (
+                    "Use scripts/inversion_si.py infer session with this best_model "
+                    "path; inference outputs can be placed under this results_dir."
+                ),
             },
         }
         with (output_dir / "training_summary.json").open("w", encoding="utf-8") as handle:
@@ -502,11 +499,7 @@ class Train:
 
 
     def log_memory(self, stage=""):
-        process = psutil.Process(os.getpid())
-        ram = process.memory_info().rss / (1024 ** 2)  # en Mo
-        vram = torch.cuda.memory_allocated() / (1024 ** 2)  # en Mo
-        max_vram = torch.cuda.max_memory_allocated() / (1024 ** 2)  # en Mo
-        print(f"[{stage}] RAM utilisée : {ram:.2f} Mo | VRAM allouée : {vram:.2f} Mo | VRAM max : {max_vram:.2f} Mo", flush=True)
+        log_process_memory(stage)
 
 
 

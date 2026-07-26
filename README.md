@@ -2,11 +2,12 @@
 
 Cache-first articulatory inversion pipeline for ASD1/ASD2 single-task 5 experiments.
 
-The code is organized around three explicit steps:
+The code is organized around one public CLI and replaceable domain modules:
 
-1. Build reusable per-session preprocessing cache.
-2. Train/evaluate from cached sessions and assemble final split tensors.
-3. Run single-session inference from a YAML config, optionally rendering video and exporting predicted contours.
+1. Build reusable per-session preprocessing and split caches.
+2. Train/evaluate or run inference from explicit YAML configs.
+3. Adapt ASD2 predictions to ASD1 with independent audio and anatomy stages.
+4. Evaluate and render from versioned artifacts.
 
 Large generated files are intentionally excluded from git. Keep `cache/`, `repro/`, `logs/`, `results/`, `mlruns/`, `.pt`, `.npz`, and `.zip` local.
 
@@ -18,17 +19,27 @@ config/
   train_config/          Train/eval split and normalization configs
   inference_config/      Single-session inference configs
 scripts/
-  preprocess_sessions.py Build per-session .pt and .npz cache
-  train_auto_batch.py    Tune batch size then launch training
-  infer_session.py       Run one configured inference target
-  render_cached_compare_video.py
+  inversion_si.py        The only public command-line entrypoint
 src/
-  preprocessing/         Session cache and contour loading logic
-  train/                 Split assembly and training logic
-  inference/             Config-driven inference logic
+  cli.py                 Repository-wide command router
+  common/                Shared artifact, frame, contour, phoneme, process helpers
+  commands/              Read-only audits and split-cache commands
+  preprocessing/         Session, incisor, and contour cache logic
+  train/                 Split assembly and training
+  inference/             Config-driven and dense-audio inference
+  rendering/             Maintained video renderers
+  orchestration/         Auto-batch, OAR, and external command launchers
+  adaption_pipeline/     Modular ASD2-to-ASD1 stages and file-based DAG
   model/                 Baseline model
-  utils/                 Dataset, metrics, DDP, and YAML helpers
+  utils/                 Lower-level numerical and rendering utilities
 ```
+
+Run `scripts/inversion_si.py --help` for the complete command tree. Files below
+`src/` are importable modules, not independent executables. The internally
+retained adaptation compatibility core lives under
+`src/adaption_pipeline/legacy/` and is reachable only through stable adapters.
+See [the refactor inventory](docs/script_refactor.md) and
+[the adaptation architecture](docs/adaption_pipeline_architecture.md).
 
 ## Environment
 
@@ -45,10 +56,10 @@ the grid-transform runtime packages pinned by this repo:
 ```powershell
 cd C:\Users\nhnguyen\PhD_A2A\Inversion_SI
 ..\inversion\.venv\Scripts\python.exe -m pip install imageio==2.37.2 roifile==2024.9.15 shapely==2.0.7 pydicom==2.4.4
-..\inversion\.venv\Scripts\python.exe scripts\run_grid_transform.py run_create_speaker_grid.py --help
+..\inversion\.venv\Scripts\python.exe scripts\inversion_si.py grid-transform run_create_speaker_grid.py --help
 ```
 
-`scripts/run_grid_transform.py` selects `Scripts/python.exe` on Windows and
+The `grid-transform` command selects `Scripts/python.exe` on Windows and
 `bin/python` on Linux. `PYTHON_BIN` still overrides that selection.
 
 GPU training and GPU inference should run inside an OAR GPU allocation on Grid5000.
@@ -83,7 +94,7 @@ Preprocess configs only describe data/session information and where to write the
 Example:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/preprocess_sessions.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py preprocess sessions \
   --config config/preprocess_config/asd1_11contour_sessions.yaml \
   --max-workers 5
 ```
@@ -121,26 +132,26 @@ Normalization policy:
 - Split cache metadata records the std-floor source (`default`, `normalization_contour_std_floor`, or legacy `contour_std_floor`) so old configs remain traceable.
 - Inference validates the contour std floor for any split cache used to de-normalize predictions. If an old cache fails this check, rebuild the split cache with the current normalization policy.
 - Cached-prediction render scripts record prediction-motion diagnostics in their summaries but do not block video rendering based on those diagnostics.
-- Audio VTLN for final inversion RMSE/video must use `scripts/build_inversion_frontend_vtln_eval_cache.py`, which re-extracts MFCC through the Inversion_SI frontend and chunking. The legacy exported-NPZ override script is diagnostic-only and is blocked by default.
+- Audio VTLN for final inversion RMSE/video must use `scripts/inversion_si.py preprocess vtln-cache`, which re-extracts MFCC through the Inversion_SI frontend and chunking. The legacy exported-NPZ override is no longer a public command.
 - Session inference rejects configs containing the legacy `audio_vtln_feature_npz` key before loading the model, so stale exported-NPZ audio VTLN configs cannot create new under-moving prediction payloads by accident.
 - Quick config audit:
-  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/audit_normalization_configs.py config/train_config/<file>.yaml`.
+  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py audit configs config/train_config/<file>.yaml`.
   The audit fails on low contour std-floor settings and legacy exported-NPZ audio VTLN configs; add `--allow-legacy-audio-vtln` only when inventorying old diagnostic configs.
 - Quick split-cache audit:
-  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/audit_split_cache_normalization.py config/train_config/<file>.yaml --splits train_sequences test_sequences`.
+  `PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py audit splits config/train_config/<file>.yaml --splits train_sequences test_sequences`.
   The audit loads split `.pt` files on CPU and fails if cached contour `std` is below the configured floor, which is the stale-cache failure mode that can make prediction contours look under-moving.
 
 Launch training inside OAR:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python src/main_train.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py train model \
   --config config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml
 ```
 
 Auto-batch helper:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/train_auto_batch.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py train auto-batch \
   --config config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml \
   --gpus 4 \
   --target-util 0.80
@@ -149,7 +160,7 @@ PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/train_auto_batch.py \
 Prepare an OAR auto-batch job without submitting:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/submit_auto_batch_oar.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py train submit \
   --config config/train_config/asd1_11contour_trainnorm_p1val_p2test_paper_st5_mfcc_500epoch.yaml \
   --python ../inversion/.venv/bin/python \
   --gpus 1 \
@@ -177,7 +188,7 @@ Inference is config-driven and targets one cached session.
 Example:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/infer_session.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py infer session \
   --config config/inference_config/asd1_11contour_trainnorm_p2_s1_video.yaml
 ```
 
@@ -211,7 +222,7 @@ Render a target-label-only MRI video with all configured contours, without
 prediction overlays or RMSE:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/render_gridnorm_session_video.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py render session \
   --predictions results/<run>/p7_s15/eval/cached_session_predictions.pt \
   --config config/train_config/<p7-config>.yaml \
   --output-dir results/<run>/p7_s15_ground_truth_video \
@@ -246,7 +257,7 @@ For a strictly label-free prediction render, also pass an explicit integer
 range:
 
 ```bash
-PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/render_gridnorm_session_video.py \
+PYTHONUNBUFFERED=1 ../inversion/.venv/bin/python scripts/inversion_si.py render session \
   --config config/train_config/<p7-config>.yaml \
   --output-dir results/<run>/p7_s15_prediction_video \
   --speaker 7 --session 15 --speaker-name P7 --session-name S15 \
@@ -270,7 +281,7 @@ are never loaded.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 PYTHONPATH=.:src \
-  ../inversion/.venv/bin/python scripts/infer_dense_audio_integer_contours.py \
+  ../inversion/.venv/bin/python scripts/inversion_si.py infer dense \
   --config config/train_config/<p7-config>.yaml \
   --checkpoint /path/to/best_model.pth \
   --audio /path/to/DENOISED_SOUND_P7_S15.wav \
@@ -314,8 +325,8 @@ The submodule contains the reusable `grid_transform/` Python package, bundled VT
 Use the local helper to run a wrapper from this repo with the workspace inversion environment and the right `PYTHONPATH`:
 
 ```bash
-scripts/run_grid_transform.py run_create_speaker_grid.py --help
-scripts/run_grid_transform.py run_create_speaker_grid.py --source vtln --speaker 1640_P7_S2_F0829
+scripts/inversion_si.py grid-transform run_create_speaker_grid.py --help
+scripts/inversion_si.py grid-transform run_create_speaker_grid.py --source vtln --speaker 1640_P7_S2_F0829
 ```
 
 Current environment note:
@@ -348,7 +359,7 @@ config/train_config/asd2_11contour_original_incisor_only_paper_st5_mfcc_500epoch
 Before pushing, stage source/config/script/docs only:
 
 ```bash
-git add .gitignore README.md config scripts src
+git add .gitignore README.md workflow.md config scripts src docs
 git status --short
 ```
 

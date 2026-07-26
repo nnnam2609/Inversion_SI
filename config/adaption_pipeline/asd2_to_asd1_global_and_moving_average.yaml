@@ -1,0 +1,110 @@
+schema_version: "1.0"
+experiment_id: asd2_to_asd1_global_and_moving_average_20260726
+training_enabled: false
+
+paths:
+  artifact_root: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/results/adaption_pipeline_asd2_to_asd1_20260726
+  grid_transform_repo: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/external/grid-transform
+  audio_normalization_repo: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/external/audio-speaker-normalization
+
+models:
+  - strategy: global
+    run_id: 9198364942434ef3b6b779aeea025fa4
+    checkpoint: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/mlruns/398239276189873865/9198364942434ef3b6b779aeea025fa4/artifacts/best_model.pth
+    checkpoint_sha256: 02c8aff14b7d80db435d6c83de23ea7f55a525a4678bbaa73289e42a747ca13f
+    config: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/config/train_config/asd2_11contour_sofiane153_s25_bfincisor_train_global_st5_mfcc_500epoch.yaml
+    split_root: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_sofiane153_s25_bfincisor_train_global_20260725/splits
+    center_key: mean
+    code_root: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI
+    output_coordinate_space: reference_native
+    capabilities:
+      uses_target_labels: false
+      uses_target_statistics: false
+      causal: true
+      blind_inference_compatible: true
+
+  - strategy: moving_average
+    run_id: 6a62398162554896ae9572a4a753bc7c
+    checkpoint: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/mlruns/588022713480426568/6a62398162554896ae9572a4a753bc7c/artifacts/best_model.pth
+    checkpoint_sha256: 4402ff84d48f64b13e29515f9f07cdbbbe4a7e16816e648309b91fec9d1c0319
+    config: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_sofiane153_s25_bfincisor_moving_average_20260726/runtime_configs/asd2_11contour_sofiane153_s25_bfincisor_moving_average_fixedbs10_4gpu.yaml
+    split_root: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/repro/asd2_11contour_sofiane153_s25_bfincisor_moving_average_20260726/splits
+    center_key: sofiane_moving_average
+    code_root: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI_sofiane153_s25_moving_20260726
+    output_coordinate_space: target_native_using_target_statistics
+    capabilities:
+      uses_target_labels: true
+      uses_target_statistics: true
+      causal: false
+      blind_inference_compatible: false
+
+cohort:
+  schema_version: "1.0"
+  cohort_id: asd1_selected_p1_to_p10_same_order_u
+  comparison_policy: exact_session_order
+  source_reference:
+    speaker: ASD2
+    session: S14
+    speaker_order: 0
+    session_order: 0
+    dataset: ASD2
+    role: reference_speaker
+    raw_speaker: "1791"
+    reference_frame: 499
+    reference_vowel: u
+    metadata:
+      selection: exact_textgrid_u
+  sessions:
+    - {speaker: P1, session: S16, speaker_order: 0, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 763, reference_vowel: u}
+    - {speaker: P2, session: S9, speaker_order: 1, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 1424, reference_vowel: u}
+    - {speaker: P3, session: S14, speaker_order: 2, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 1168, reference_vowel: u}
+    - {speaker: P4, session: S4, speaker_order: 3, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 1179, reference_vowel: u}
+    - {speaker: P5, session: S6, speaker_order: 4, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 813, reference_vowel: u}
+    - {speaker: P6, session: S8, speaker_order: 5, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 597, reference_vowel: u}
+    - {speaker: P7, session: S2, speaker_order: 6, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 500, reference_vowel: u}
+    - {speaker: P8, session: S2, speaker_order: 7, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 298, reference_vowel: u}
+    - {speaker: P9, session: S5, speaker_order: 8, session_order: 0, dataset: ASD1, role: unseen_target, reference_frame: 259, reference_vowel: u}
+    - {speaker: P10, session: S14, speaker_order: 9, session_order: 0, dataset: ASD1, role: same_speaker_control, reference_frame: 478, reference_vowel: u}
+
+normalization_conditions:
+  - original
+  - anatomical
+  - audio
+  - anatomical_audio
+
+anatomical_normalization:
+  affine: true
+  tps_after_affine: true
+  vowel: u
+  calibration_images:
+    rows: 2
+    columns: 4
+    required_errors_mm: [annotation, affine, affine_tps]
+
+audio_normalization:
+  rms_target: 0.03
+  vtln: true
+  report_correlation_before_after: true
+  primary_correlation_measurement: signed_target_reference_change
+  signed_change_definition: correlation_after_vtln_minus_before_vtln
+  contour_metrics_used_for_audio_correlation: false
+  strict_same_number_and_session_order: true
+
+evaluation:
+  frame_pairing: exact
+  coordinate_scale_mm: 1.62
+  primary_metric: symmetric_p2cp_mm
+  secondary_metric: coordinate_rmse_mm
+  aggregate_after_per_frame_metric: true
+  exclude_calibration_frame_from_primary: true
+
+rendering:
+  fps: 50
+  synchronize_on: frame_id
+  audio_track: original_once
+  layouts:
+    one_video: {rows: 1, columns: 1}
+    two_video: {rows: 1, columns: 2}
+    four_condition: {rows: 2, columns: 2}
+    two_strategy_compare: {rows: 2, columns: 4}
+    anatomical_diagnostic: {rows: 2, columns: 4}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 from collections import Counter
 from pathlib import Path
@@ -10,24 +9,10 @@ import numpy as np
 import torch
 
 from src.utils.config_validation import load_yaml_config
+from src.common.phonemes import decode_phoneme, load_phoneme_inventory as load_phonemes
 
 def load_config(path: Path, *, allow_legacy_audio_vtln: bool = False) -> dict[str, Any]:
     return load_yaml_config(path, allow_legacy_audio_vtln=allow_legacy_audio_vtln)
-
-
-def load_phonemes(config: dict[str, Any]) -> list[str]:
-    with Path(config["phonemesdir"]).open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def decode_phoneme(vector: torch.Tensor | np.ndarray, phonemes: list[str]) -> str:
-    if isinstance(vector, torch.Tensor):
-        arr = vector.detach().cpu().numpy()
-    else:
-        arr = np.asarray(vector)
-    if arr.size == 0 or np.allclose(arr, 0):
-        return "UNK"
-    return str(phonemes[int(arr.argmax())])
 
 
 def frame_token(value: float) -> str:

@@ -18,7 +18,11 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from src.model.baseline_5 import BaselineModel  # noqa: E402
-from src.utils.config_validation import load_yaml_config  # noqa: E402
+from src.utils.config_validation import load_yaml_config as load_config  # noqa: E402
+from src.common.phonemes import (  # noqa: E402
+    decode_phoneme,
+    load_phoneme_inventory as load_phonemes,
+)
 from src.utils.normalization import (  # noqa: E402
     DENORM_SPLIT_CACHE_KEYS,
     INFERENCE_SPLIT_CACHE_KEYS,
@@ -87,10 +91,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(path: Path) -> dict[str, Any]:
-    return load_yaml_config(path)
-
-
 def resolve_device(device_arg: str) -> torch.device:
     if device_arg == "cpu":
         return torch.device("cpu")
@@ -129,18 +129,6 @@ def load_model(config: dict[str, Any], checkpoint_path: Path, device: torch.devi
     model.load_state_dict(cleaned, strict=True)
     model.eval()
     return model
-
-
-def load_phonemes(config: dict[str, Any]) -> list[str]:
-    with open(config["phonemesdir"], "r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def decode_phoneme(row: torch.Tensor, phonemes: list[str]) -> str:
-    vector = row.detach().cpu().numpy()
-    if vector.size == 0 or np.allclose(vector, 0):
-        return "UNK"
-    return str(phonemes[int(vector.argmax())])
 
 
 def select_session_indices(state: dict[str, Any], speaker: int, session: int) -> list[int]:

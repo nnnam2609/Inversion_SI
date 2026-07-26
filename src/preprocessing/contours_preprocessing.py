@@ -12,7 +12,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 import glob
-from preprocessing.main_preprocessing import Corpus
+from src.preprocessing.main_preprocessing import Corpus
 
 class Corpus_contours(Corpus):
     def __init__(self, config, sequences, rank):
