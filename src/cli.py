@@ -15,6 +15,7 @@ class Command:
     module: str
     help: str
     passes_argv: bool = False
+    entrypoint: str = "main"
 
 
 COMMANDS = (
@@ -38,6 +39,13 @@ COMMANDS = (
         ("train", "model"),
         "src.main_train",
         "Run training from an explicit config.",
+    ),
+    Command(
+        ("train", "motion-ar"),
+        "src.commands.motion_ar_stage0",
+        "Train or sanity-check one-frame-reference autoregressive inversion.",
+        passes_argv=True,
+        entrypoint="train_main",
     ),
     Command(
         ("train", "auto-batch"),
@@ -85,6 +93,27 @@ COMMANDS = (
         "Diagnose temporal motion in prediction packs.",
     ),
     Command(
+        ("audit", "motion-ar"),
+        "src.commands.motion_ar_stage0",
+        "Audit ASD2 caches for the Stage-0 autoregressive experiment.",
+        passes_argv=True,
+        entrypoint="audit_main",
+    ),
+    Command(
+        ("evaluate", "motion-ar"),
+        "src.commands.motion_ar_stage0",
+        "Evaluate Stage-0 baselines, free rollout, and ablations.",
+        passes_argv=True,
+        entrypoint="evaluate_main",
+    ),
+    Command(
+        ("diagnose", "motion-ar"),
+        "src.commands.motion_ar_stage0",
+        "Print reusable motion diagnostics from a Stage-0 evaluation.",
+        passes_argv=True,
+        entrypoint="diagnose_main",
+    ),
+    Command(
         ("adapt",),
         "src.adaption_pipeline.cli",
         "Run the modular ASD2-to-ASD1 adaptation pipeline.",
@@ -130,7 +159,7 @@ def _temporary_argv(program: str, arguments: Sequence[str]) -> Iterator[None]:
 
 def _run(command: Command, arguments: list[str]) -> int:
     module = importlib.import_module(command.module)
-    entrypoint: Callable = getattr(module, "main")
+    entrypoint: Callable = getattr(module, command.entrypoint)
     if command.passes_argv:
         result = entrypoint(arguments)
     else:

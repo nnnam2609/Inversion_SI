@@ -1,0 +1,4 @@
+base_config: config/train_config/motion_ar/stage0a_seed42.yaml
+
+experiment_name: motion_ar_stage0a_ar0_seed42
+velocity_loss_weight: 0.0
