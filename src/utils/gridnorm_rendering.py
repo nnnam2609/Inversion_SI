@@ -65,8 +65,10 @@ def needed_integer_frames(rows: list[dict[str, Any]]) -> list[int]:
     needed: set[int] = set()
     for row in rows:
         frame_number = float(row["frame_number"])
-        needed.add(int(math.floor(frame_number)))
-        needed.add(int(math.ceil(frame_number)))
+        rounded = int(round(frame_number))
+        if not math.isclose(frame_number, rounded, rel_tol=0.0, abs_tol=1e-4):
+            raise ValueError(f"NEVER render fractional MRI frame {frame_number}")
+        needed.add(rounded)
     return sorted(needed)
 
 
@@ -84,10 +86,7 @@ def build_dicom_mri_cache(dicom_dir: Path, rows: list[dict[str, Any]], output_di
 
 
 def mri_for_frame(frame_number: float, cache: dict[int, np.ndarray]) -> np.ndarray:
-    lower = int(math.floor(frame_number))
-    upper = int(math.ceil(frame_number))
-    if lower == upper:
-        return cache[lower]
-    alpha = frame_number - math.floor(frame_number)
-    blended = (1.0 - alpha) * cache[lower].astype(np.float32) + alpha * cache[upper].astype(np.float32)
-    return np.round(blended).astype(np.uint8)
+    rounded = int(round(frame_number))
+    if not math.isclose(frame_number, rounded, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER render fractional MRI frame {frame_number}")
+    return cache[rounded]

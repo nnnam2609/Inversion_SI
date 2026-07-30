@@ -8,11 +8,11 @@ import torch.optim as optim
 import numpy as np
 import torch.nn.functional as F
 from torchmetrics.functional import structural_similarity_index_measure
-from utils.tools import get_phonemes_list, one_hot_to_phonemes_np, one_hot_to_phonemes
-import psutil
+from src.utils.tools import get_phonemes_list, one_hot_to_phonemes_np, one_hot_to_phonemes
 from scipy.stats import pearsonr
 from sklearn.metrics import accuracy_score
 import joblib
+from src.common.resources import log_process_memory as log_memory
                         
 def read_npy(arr, path):
 
@@ -188,13 +188,6 @@ def tract_variables(y, y_pred, phonemes, frames_name, folder_run, datadir):
     pd.DataFrame(TVs_data).to_csv(os.path.join(folder_run, "tract_variables_target.csv"), index=False)
     pd.DataFrame(TVs_data_pred).to_csv(os.path.join(folder_run, "tract_variables_pred.csv"), index=False)
     pd.DataFrame(trajectory_corr_data).to_csv(os.path.join(folder_run, "trajectory_pearson_correlation.csv"), index=False)
-
-def log_memory(stage=""):
-    process = psutil.Process(os.getpid())
-    ram = process.memory_info().rss / (1024 ** 2)  # en Mo
-    vram = torch.cuda.memory_allocated() / (1024 ** 2)  # en Mo
-    max_vram = torch.cuda.max_memory_allocated() / (1024 ** 2)  # en Mo
-    print(f"[{stage}] RAM utilisée : {ram:.2f} Mo | VRAM allouée : {vram:.2f} Mo | VRAM max : {max_vram:.2f} Mo", flush=True)
 
 def test_model(self, 
                mfccs_test, contours_test, length_sequences, length_seq, rank, std_test, mean_test, 

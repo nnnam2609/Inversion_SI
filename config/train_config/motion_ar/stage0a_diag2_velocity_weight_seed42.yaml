@@ -1,0 +1,11 @@
+base_config: config/train_config/motion_ar/stage0a_seed42.yaml
+
+experiment_name: motion_ar_stage0a_diag2_velocity_weight_seed42
+resume_training_checkpoint: results/motion_ar_stage0/runs/diag1_more_zero_tf_seed42/last_model.pth
+selection_reference_checkpoint: results/motion_ar_stage0/runs/diag1_more_zero_tf_seed42/best_model.pth
+additional_training_epochs: 10
+patience: 10
+
+# Controlled factor 2: change only the velocity-loss weight.
+velocity_loss_weight: 1.0
+reevaluate_selection_reference: true

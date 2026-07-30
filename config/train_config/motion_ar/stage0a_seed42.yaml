@@ -1,0 +1,29 @@
+base_config: repro/asd2_11contour_sofiane153_s25_bfincisor_train_global_20260725/runtime_configs/asd2_11contour_sofiane153_s25_bfincisor_train_global_st5_mfcc_500epoch_local_windows.yaml
+
+experiment_name: motion_ar_stage0a_seed42
+model_architecture: anchored_autoregressive_contour
+seed: 42
+n_epochs: 35
+batch_size: 32
+patience: 10
+
+embedding_hidden_dimension: 256
+embedding_dimension: 128
+decoder_hidden_dimension: 512
+output_hidden_dimension: 512
+
+teacher_forcing:
+  start_ratio: 1.0
+  end_ratio: 0.0
+  warmup_epochs: 5
+  decay_epochs: 20
+
+audio_encoder_checkpoint: results/asd2_11contour_sofiane153_s25_bfincisor_train_global_st5_mfcc_500epoch/single_task5_asd2_11contour_sofiane153_s25_bfincisor_train_global_11_articulators_ac_e_ll_p_spm_t_ul_vf_tc_li_ui/best_model.pth
+freeze_audio_encoder_epochs: 5
+decoder_learning_rate: 0.001
+audio_encoder_learning_rate: 0.0001
+gradient_clip_norm: 1.0
+
+velocity_loss_weight: 0.5
+velocity_class_weighting: mobile
+mobile_threshold_ratio: 0.25

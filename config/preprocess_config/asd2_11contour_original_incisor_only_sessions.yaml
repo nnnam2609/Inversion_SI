@@ -1,4 +1,5 @@
-base_config: config/train_config/asd2_11contour_original_incisor_only_paper_st5_mfcc_500epoch.yaml
+# Historical contour-source variant; reuse the canonical ASD2 session split.
+base_config: config/train_config/asd2_11contour_vtln_lowerrepairv2_upperlegacypos_20260721_train_global_rawstd_st5_mfcc_500epoch_fixedbs10_4gpu.yaml
 session_cache_dir: /srv/storage/talc2@talc-data2.nancy.grid5000.fr/multispeech/calcul/users/nhanguyen/Inversion_SI/cache
 sessions_from_base_splits: true
 max_workers: 5

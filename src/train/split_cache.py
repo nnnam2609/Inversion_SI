@@ -10,26 +10,47 @@ import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from preprocessing.session_cache import (
+from src.preprocessing.session_cache import (
     SPLIT_FILES,
     atomic_torch_save,
     contour_pack_path,
-    dataset_type_for_sequence,
     raw_session_part_path,
     recompute_mean_datas,
     write_metadata,
 )
-from utils.normalization import (
+from src.common.datasets import dataset_type_for_sequence
+from src.utils.normalization import (
+    NORMALIZATION_STD_POLICY_KEY,
+    RAW_POSITIVE_NORMALIZATION_STD_POLICY,
     TRAINING_SPLIT_CACHE_KEYS,
     apply_std_floor,
     load_validated_split_cache_state,
     normalization_floor_metadata,
+    normalization_std_policy,
     normalization_std_floors,
+    validate_raw_positive_std,
 )
 
 
 REQUIRED_RAW_KEYS = {"features", "contours", "frames", "phonemes", "length_datas"}
 DEFAULT_NORMALIZATION_MODE = "train_global"
+DEFAULT_NORMALIZATION_FIT_ESTIMATOR = "mean_sequence_statistics"
+POOLED_FRAME_NORMALIZATION_FIT_ESTIMATOR = "pooled_frames"
+
+
+def normalization_fit_estimator(config: Dict[str, Any]) -> str:
+    estimator = str(
+        config.get("normalization_fit_estimator", DEFAULT_NORMALIZATION_FIT_ESTIMATOR)
+    ).lower()
+    supported = {
+        DEFAULT_NORMALIZATION_FIT_ESTIMATOR,
+        POOLED_FRAME_NORMALIZATION_FIT_ESTIMATOR,
+    }
+    if estimator not in supported:
+        raise ValueError(
+            f"Unsupported normalization_fit_estimator={estimator!r}; expected one of {sorted(supported)}"
+        )
+    return estimator
 
 
 def session_cache_dir(config: Dict[str, Any]) -> Path:
@@ -196,7 +217,8 @@ def fit_normalization(
     fit_splits: Iterable[str],
     mode: str,
 ) -> Dict[str, Any]:
-    contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+    std_policy = normalization_std_policy(config)
+    fit_estimator = normalization_fit_estimator(config)
 
     fit_features: List[np.ndarray] = []
     fit_contours: List[np.ndarray] = []
@@ -211,22 +233,41 @@ def fit_normalization(
         contour.reshape(contour.shape[0], contour.shape[1] * contour.shape[2])
         for contour in fit_contours
     ]
-    std_contour = np.mean(np.array([np.std(item, axis=0) for item in contour_flat]), axis=0)
-    mean_contour = np.mean(np.array([np.mean(item, axis=0) for item in contour_flat]), axis=0)
-    std_mfcc = np.mean(np.array([np.std(item, axis=0) for item in fit_features]), axis=0)
-    mean_mfcc = np.mean(np.array([np.mean(item, axis=0) for item in fit_features]), axis=0)
+    if fit_estimator == POOLED_FRAME_NORMALIZATION_FIT_ESTIMATOR:
+        pooled_contours = np.concatenate(contour_flat, axis=0)
+        pooled_features = np.concatenate(fit_features, axis=0)
+        std_contour = np.std(pooled_contours, axis=0)
+        mean_contour = np.mean(pooled_contours, axis=0)
+        std_mfcc = np.std(pooled_features, axis=0)
+        mean_mfcc = np.mean(pooled_features, axis=0)
+    else:
+        std_contour = np.mean(np.array([np.std(item, axis=0) for item in contour_flat]), axis=0)
+        mean_contour = np.mean(np.array([np.mean(item, axis=0) for item in contour_flat]), axis=0)
+        std_mfcc = np.mean(np.array([np.std(item, axis=0) for item in fit_features]), axis=0)
+        mean_mfcc = np.mean(np.array([np.mean(item, axis=0) for item in fit_features]), axis=0)
+
+    std_contour = std_contour.reshape(len(config["classes"]), int(config["output_layer"]))
+    if std_policy == RAW_POSITIVE_NORMALIZATION_STD_POLICY:
+        used_std_contour = validate_raw_positive_std(
+            std_contour,
+            "contour",
+            classes=list(config["classes"]),
+            output_layer=int(config["output_layer"]),
+        ).astype(np.float32, copy=False)
+        used_std_mfcc = validate_raw_positive_std(std_mfcc, "mfcc").astype(np.float32, copy=False)
+    else:
+        contour_std_floor, mfcc_std_floor = normalization_std_floors(config)
+        used_std_contour = apply_std_floor(std_contour, contour_std_floor, np.float32)
+        used_std_mfcc = apply_std_floor(std_mfcc, mfcc_std_floor, np.float32)
 
     return {
         "normalization_mode": mode,
+        "normalization_fit_estimator": fit_estimator,
         "normalization_fit_splits": list(fit_splits),
         **normalization_floor_metadata(config),
-        "std_mfcc": apply_std_floor(std_mfcc, mfcc_std_floor, np.float32),
+        "std_mfcc": used_std_mfcc,
         "mean_mfcc": mean_mfcc.astype(np.float32),
-        "std_contour": apply_std_floor(
-            std_contour.reshape(len(config["classes"]), int(config["output_layer"])),
-            contour_std_floor,
-            np.float32,
-        ),
+        "std_contour": used_std_contour,
         "mean_contour": mean_contour.reshape(
             len(config["classes"]),
             int(config["output_layer"]),
@@ -327,6 +368,7 @@ def assemble_split_direct(
         "feature_shape": list(state["features"].shape),
         "label_shape": list(state["labels"].shape),
         "normalization_mode": norm_stats["normalization_mode"],
+        "normalization_fit_estimator": norm_stats["normalization_fit_estimator"],
         "normalization_fit_splits": norm_stats["normalization_fit_splits"],
     }
 
@@ -365,12 +407,14 @@ def ensure_split_caches(config: Dict[str, Any]) -> Dict[str, Any]:
         "session_cache_dir": str(session_cache_dir(usable_config)),
         "split_cache_dir": str(output_dir),
         "normalization_mode": norm_stats["normalization_mode"],
+        "normalization_fit_estimator": norm_stats["normalization_fit_estimator"],
         "normalization_fit_splits": norm_stats["normalization_fit_splits"],
         "normalization_fit_split": (
             norm_stats["normalization_fit_splits"][0]
             if len(norm_stats["normalization_fit_splits"]) == 1
             else None
         ),
+        NORMALIZATION_STD_POLICY_KEY: norm_stats[NORMALIZATION_STD_POLICY_KEY],
         "normalization_contour_std_floor": norm_stats["normalization_contour_std_floor"],
         "normalization_mfcc_std_floor": norm_stats["normalization_mfcc_std_floor"],
         "normalization_contour_std_floor_source": norm_stats["normalization_contour_std_floor_source"],

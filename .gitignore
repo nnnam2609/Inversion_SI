@@ -11,3 +11,6 @@ mlruns/
 repro/
 results/
 normalization_values/
+*.md
+!/README.md
+/docs/

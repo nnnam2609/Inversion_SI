@@ -2,13 +2,13 @@ import os
 import sys
 #from preprocessing.main00_preprocessing import CustomDataset
 #from preprocessing.ema00_preprocessing import EmaDataset
-from preprocessing.contours_preprocessing import Corpus_contours
+from src.preprocessing.contours_preprocessing import Corpus_contours
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data import DataLoader, DistributedSampler
-from train.split_cache import ensure_split_caches, split_cache_path
-from utils.normalization import (
+from src.train.split_cache import ensure_split_caches, split_cache_path
+from src.utils.normalization import (
     TRAINING_SPLIT_CACHE_KEYS,
     load_validated_split_cache_state,
     validate_contour_std_floor,

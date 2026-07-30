@@ -28,16 +28,17 @@ os.environ.setdefault("MPLCONFIGDIR", str(REPO_ROOT / ".cache" / "matplotlib"))
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from preprocessing.contours_preprocessing import Corpus_contours  # noqa: E402
-from preprocessing.main_preprocessing import Corpus  # noqa: E402
-from utils.config_validation import load_yaml_config  # noqa: E402
-from utils.normalization import (  # noqa: E402
+from src.preprocessing.contours_preprocessing import Corpus_contours  # noqa: E402
+from src.preprocessing.main_preprocessing import Corpus  # noqa: E402
+from src.utils.config_validation import load_yaml_config as load_config  # noqa: E402
+from src.utils.normalization import (  # noqa: E402
     TRAINING_SPLIT_CACHE_KEYS,
     apply_std_floor,
     load_validated_split_cache_state,
     normalization_floor_metadata,
     normalization_std_floors,
 )
+from src.common.datasets import dataset_type_for_sequence  # noqa: E402
 
 
 SPLIT_FILES = {
@@ -49,17 +50,6 @@ SPLIT_FILES = {
 
 def normalization_mode(config: Dict[str, Any]) -> str:
     return str(config.get("normalization_mode", "bucket")).lower()
-
-
-def dataset_type_for_sequence(config: Dict[str, Any], sequence: str) -> str:
-    sequence_key = str(sequence)
-    dataset_types = config.get("dataset_types", {})
-    if sequence_key in dataset_types:
-        return str(dataset_types[sequence_key]).lower()
-    dataset_type = str(config.get("dataset_type", "asd2")).lower()
-    if dataset_type == "mixed":
-        return "asd1" if sequence_key.upper().startswith("P") else "asd2"
-    return dataset_type
 
 
 def raw_session_part_path(cache_dir: Path, config: Dict[str, Any], bucket: str, session: str) -> Path:
@@ -488,6 +478,11 @@ def load_or_build_contour_npz_pack(
     def load_one(item: Tuple[int, int, int, str]) -> Tuple[int, int, np.ndarray]:
         frame_idx, frame_number, art_idx, articulator = item
         contour_path = resolve_contour_path(image_folder, frame_number, articulator, overlay_folder)
+        if not contour_path.is_file():
+            raise FileNotFoundError(
+                f"Missing contour file for frame={frame_number} "
+                f"articulator={articulator}: {contour_path}"
+            )
         contour = canonicalize_contour(np.load(contour_path), contour_path)
         return frame_idx, art_idx, contour
 
@@ -548,7 +543,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default=str(REPO_ROOT / "config/train_config/asd2_full_single_task5_2gpu_grele_2epoch.yaml"),
+        default=str(
+            REPO_ROOT
+            / "config/train_config/"
+            "asd2_11contour_vtln_lowerrepairv2_upperlegacypos_20260721_"
+            "train_global_rawstd_st5_mfcc_500epoch_fixedbs10_4gpu.yaml"
+        ),
         help="Training YAML to use as source of truth.",
     )
     parser.add_argument(
@@ -610,10 +610,6 @@ def parse_args() -> argparse.Namespace:
         help="Optional session filter, e.g. --only-sessions 1804/S16 1804/S17.",
     )
     return parser.parse_args()
-
-
-def load_config(path: Path) -> Dict[str, Any]:
-    return load_yaml_config(path)
 
 
 def parse_session_filter(values: list[str] | None) -> set[tuple[str, str]] | None:

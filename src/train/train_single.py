@@ -9,14 +9,14 @@ from src.model.baseline_5 import BaselineModel
 #from src.model.gru import BaselineModel
 #from src.model.tcn import BaselineModel
 #from src.model.model_lstm import BaselineModel
-import utils.metrics as metrics
+import src.utils.metrics as metrics
 from src.utils.temporal_loss import contour_velocity_loss
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.pytorch
 from torch.utils.data import DataLoader
-from utils.evaluation import test_model
+from src.utils.evaluation import test_model
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import torch.nn.functional as F

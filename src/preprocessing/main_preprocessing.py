@@ -18,7 +18,8 @@ import time
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 from transformers import AutoFeatureExtractor, HubertModel
 
-from utils.normalization import apply_std_floor, normalization_std_floors
+from src.utils.normalization import apply_std_floor, normalization_std_floors
+from src.common.datasets import dataset_type_for_sequence
 
 
 def _numeric_id(value):
@@ -26,17 +27,6 @@ def _numeric_id(value):
     if not digits:
         raise ValueError(f"Cannot extract numeric id from {value!r}")
     return float(digits)
-
-
-def _dataset_type_for_sequence(config, sequence):
-    sequence_key = str(sequence)
-    dataset_types = config.get("dataset_types", {})
-    if sequence_key in dataset_types:
-        return str(dataset_types[sequence_key]).lower()
-    dataset_type = str(config.get("dataset_type", "asd2")).lower()
-    if dataset_type == "mixed":
-        return "asd1" if sequence_key.upper().startswith("P") else "asd2"
-    return dataset_type
 
 
 def _canonicalize_contour_array(contour):
@@ -201,7 +191,7 @@ class Corpus(Dataset):
             textgrid_files[sequence] = []
             images_files[sequence] = []
             for session in sessions:
-                dataset_type = _dataset_type_for_sequence(self.config, sequence)
+                dataset_type = dataset_type_for_sequence(self.config, sequence)
                 if dataset_type == "asd1":
                     audio_file, textgrid_file, image_folder = self._resolve_asd1_session(sequence, session)
                 elif dataset_type == "asd2":
@@ -221,9 +211,23 @@ class Corpus(Dataset):
         audio_folder = os.path.join(datadir, sequence, session)
         if not os.path.isdir(audio_folder):
             raise FileNotFoundError(f"Missing ASD2 session folder: {audio_folder}")
+        contour_folder_names = [
+            'inference_contours_registered',
+            'inference_contours',
+        ]
+        contour_overrides = self.config.get("asd2_contour_source_overrides", {})
+        override_key = f"{sequence}/{session}"
+        contour_override = contour_overrides.get(override_key)
+        if contour_override is not None:
+            if contour_override not in contour_folder_names:
+                raise ValueError(
+                    f"Invalid ASD2 contour source override for {override_key}: "
+                    f"{contour_override!r}; expected one of {contour_folder_names}"
+                )
+            contour_folder_names = [contour_override]
         contour_candidates = [
-            os.path.join(audio_folder, 'inference_contours_registered'),
-            os.path.join(audio_folder, 'inference_contours'),
+            os.path.join(audio_folder, folder_name)
+            for folder_name in contour_folder_names
         ]
         image_folder = next((path for path in contour_candidates if os.path.isdir(path)), None)
         wav_candidates = [

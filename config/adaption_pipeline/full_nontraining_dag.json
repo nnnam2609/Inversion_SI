@@ -1,0 +1,203 @@
+{
+  "schema_version": "1.0",
+  "training_enabled": false,
+  "stages": [
+    {
+      "name": "capture_provenance",
+      "kind": "cpu",
+      "dependencies": [],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "capture-provenance",
+        "--grid-repo",
+        "external/grid-transform",
+        "--audio-repo",
+        "external/audio-speaker-normalization",
+        "--output",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/provenance/external_repositories.json"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/provenance/external_repositories.json"
+      ]
+    },
+    {
+      "name": "fit_audio_normalization",
+      "kind": "cpu",
+      "dependencies": ["capture_provenance"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "fit-audio",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_normalization.json"
+      ]
+    },
+    {
+      "name": "infer_global",
+      "kind": "gpu_inference",
+      "dependencies": ["fit_audio_normalization"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "infer",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--strategy",
+        "global",
+        "--device",
+        "cuda:0",
+        "--audio-normalization",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_normalization.json",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/global/baseline_anatomical_summary.json"
+      ]
+    },
+    {
+      "name": "infer_moving_average",
+      "kind": "gpu_inference",
+      "dependencies": ["fit_audio_normalization"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "infer",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--strategy",
+        "moving_average",
+        "--device",
+        "cuda:1",
+        "--audio-normalization",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_normalization.json",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/moving_average/baseline_anatomical_summary.json"
+      ]
+    },
+    {
+      "name": "report_audio_correlation",
+      "kind": "cpu",
+      "dependencies": ["fit_audio_normalization"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "report-audio",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--audio-normalization",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_normalization.json",
+        "--output-json",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_correlation_before_after.json",
+        "--output-csv",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_correlation_before_after.csv"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_correlation_before_after.json",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/audio_normalization/audio_correlation_before_after.csv"
+      ]
+    },
+    {
+      "name": "evaluate",
+      "kind": "cpu",
+      "dependencies": ["infer_global", "infer_moving_average"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "evaluate",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--prediction-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/evaluation"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/evaluation/evaluation.json",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/evaluation/strategy_comparison.csv"
+      ]
+    },
+    {
+      "name": "render_anatomical_diagnostics",
+      "kind": "cpu",
+      "dependencies": ["capture_provenance"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "render-anatomy",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/anatomical_diagnostics"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/anatomical_diagnostics/anatomical_diagnostics.json"
+      ]
+    },
+    {
+      "name": "render_videos",
+      "kind": "cpu",
+      "dependencies": ["infer_global", "infer_moving_average"],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "render-videos",
+        "--prediction-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726",
+        "--output-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/videos",
+        "--speaker",
+        "P1",
+        "--session",
+        "S16",
+        "--mri-workers",
+        "8"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/videos/P1/S16/video_manifest.json"
+      ]
+    },
+    {
+      "name": "final_audit",
+      "kind": "cpu",
+      "dependencies": [
+        "report_audio_correlation",
+        "evaluate",
+        "render_anatomical_diagnostics",
+        "render_videos"
+      ],
+      "command": [
+        "../inversion/.venv/bin/python",
+        "scripts/inversion_si.py",
+        "adapt",
+        "audit",
+        "--pipeline-config",
+        "config/adaption_pipeline/asd2_to_asd1_global_and_moving_average.yaml",
+        "--artifact-root",
+        "results/adaption_pipeline_asd2_to_asd1_20260726"
+      ],
+      "outputs": [
+        "results/adaption_pipeline_asd2_to_asd1_20260726/RUN_MANIFEST.json",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/REPORT.md",
+        "results/adaption_pipeline_asd2_to_asd1_20260726/_SUCCESS"
+      ]
+    }
+  ]
+}

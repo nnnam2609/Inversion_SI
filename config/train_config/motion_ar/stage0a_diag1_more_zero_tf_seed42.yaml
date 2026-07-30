@@ -1,0 +1,7 @@
+base_config: config/train_config/motion_ar/stage0a_seed42.yaml
+
+experiment_name: motion_ar_stage0a_diag1_more_zero_tf_seed42
+resume_training_checkpoint: results/motion_ar_stage0/runs/seed42/last_model.pth
+selection_reference_checkpoint: results/motion_ar_stage0/runs/seed42/best_model.pth
+additional_training_epochs: 10
+patience: 10

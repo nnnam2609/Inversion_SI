@@ -13,17 +13,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from src.utils.config_validation import load_yaml_config  # noqa: E402
+from src.utils.config_validation import load_yaml_config as load_yaml  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run cached session inference and render videos from a YAML config.")
     parser.add_argument("--config", type=Path, required=True)
     return parser.parse_args()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    return load_yaml_config(path)
 
 
 def resolve_path(value: str | Path | None) -> Path | None:
@@ -155,7 +151,9 @@ def main() -> None:
         dicom_index_cache = output_dir / "dicom_index.json"
         render_command = [
             python,
-            "scripts/render_cached_compare_video.py",
+            "scripts/inversion_si.py",
+            "render",
+            "cached",
             "--predictions",
             str(mode_dir / "cached_session_predictions.pt"),
             "--config",

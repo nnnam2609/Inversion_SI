@@ -1,0 +1,36 @@
+run_name: asd2_11contour_vtln20260719_test_1775_s37_compare
+dataset: asd2
+note: >
+  Test-session QC video for the ASD2 11-contour model trained with the new
+  VTLN-derived open upper/lower-incisor annotations. Ground truth is drawn
+  solid and prediction dashed on the registered MRI frames.
+
+train_config: repro/asd2_11contour_vtln20260719_train_global/auto_batch_configs/6784374/asd2_11contour_vtln20260719_train_global_rawstd_st5_mfcc_500epoch_auto80_bs1150_4gpu_20260719_164428.yaml
+checkpoint: mlruns/610923529796522440/adbb5c9946704b568d1f7a48b445a0c0/artifacts/best_model.pth
+output_dir: results/asd2_11contour_vtln20260719_test_1775_s37_compare_20260719
+device: cuda
+write_contours: false
+
+target:
+  speaker: 1775
+  session: 37
+  split: test_sequences
+
+exclude_rmse_classes: []
+
+predict_only:
+  enabled: false
+
+eval:
+  enabled: true
+  prediction_denorm_cache: repro/asd2_11contour_vtln20260719_train_global/splits/train_sequences.pt
+  video_name: 1775_S37_best_epoch211_pred_vs_gt_mri.mp4
+  write_contours: false
+
+render:
+  fps: 12
+  scale: 4
+  background: gray
+  max_frames:
+  mri_npy_dir: /srv/storage/talc@storage4.nancy/multispeech/corpus/speech_production/iadi/ArtSpeech_Database_2/1775/S37/NPY_MR_registered
+  frame_offset: 0

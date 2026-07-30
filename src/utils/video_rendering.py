@@ -76,6 +76,7 @@ def attach_audio(
     output_mp4: Path,
     start_seconds: float,
     duration_seconds: float,
+    output_fps: str | None = None,
 ) -> bool:
     if not audio_path.is_file():
         return False
@@ -97,20 +98,26 @@ def attach_audio(
         "0:v:0",
         "-map",
         "1:a:0",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "medium",
-        "-crf",
-        "20",
-        "-movflags",
-        "+faststart",
-        "-c:a",
-        "aac",
-        "-shortest",
-        str(output_mp4),
     ]
+    if output_fps is not None:
+        command.extend(["-r", str(output_fps)])
+    command.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "medium",
+            "-crf",
+            "20",
+            "-movflags",
+            "+faststart",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(output_mp4),
+        ]
+    )
     subprocess.run(command, check=True)
     return True

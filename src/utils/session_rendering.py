@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 from collections import Counter
 from pathlib import Path
@@ -10,31 +9,17 @@ import numpy as np
 import torch
 
 from src.utils.config_validation import load_yaml_config
+from src.common.phonemes import decode_phoneme, load_phoneme_inventory as load_phonemes
 
 def load_config(path: Path, *, allow_legacy_audio_vtln: bool = False) -> dict[str, Any]:
     return load_yaml_config(path, allow_legacy_audio_vtln=allow_legacy_audio_vtln)
 
 
-def load_phonemes(config: dict[str, Any]) -> list[str]:
-    with Path(config["phonemesdir"]).open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def decode_phoneme(vector: torch.Tensor | np.ndarray, phonemes: list[str]) -> str:
-    if isinstance(vector, torch.Tensor):
-        arr = vector.detach().cpu().numpy()
-    else:
-        arr = np.asarray(vector)
-    if arr.size == 0 or np.allclose(arr, 0):
-        return "UNK"
-    return str(phonemes[int(arr.argmax())])
-
-
 def frame_token(value: float) -> str:
     rounded = int(round(value))
-    if abs(value - rounded) < 1e-4:
-        return f"{rounded:04d}"
-    return f"{int(math.floor(value)):04d}p{int(round((value - math.floor(value)) * 10)):01d}"
+    if not math.isclose(value, rounded, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER render fractional frame {value}")
+    return f"{rounded:04d}"
 
 
 def _load_ground_truth_contour(path: Path) -> np.ndarray:
@@ -56,13 +41,7 @@ def build_ground_truth_timeline(
     step: float,
     max_frames: int | None,
 ) -> list[dict[str, Any]]:
-    """Build a per-frame ground-truth timeline from contour files.
-
-    Integer frames are loaded directly. Fractional frames are linearly
-    interpolated from their two adjacent integer frames. Missing contours stay
-    missing and are reported per row; a contour from another frame is never
-    held or reused.
-    """
+    """Build an integer-only ground-truth timeline from contour files."""
     contour_dir = contour_dir.resolve()
     if not contour_dir.is_dir():
         raise FileNotFoundError(f"Ground-truth contour directory does not exist: {contour_dir}")
@@ -74,18 +53,22 @@ def build_ground_truth_timeline(
         raise ValueError(f"Ground-truth timeline step must be positive, got {step}")
     if end_frame < start_frame:
         raise ValueError(f"Ground-truth end frame {end_frame} precedes start frame {start_frame}")
+    if not math.isclose(step, 1.0, rel_tol=0.0, abs_tol=1e-8):
+        raise ValueError("NEVER render fractional frames; ground-truth timeline step must be 1.0")
+    start_integer = int(round(start_frame))
+    end_integer = int(round(end_frame))
+    if not math.isclose(start_frame, start_integer, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER render fractional start frame {start_frame}")
+    if not math.isclose(end_frame, end_integer, rel_tol=0.0, abs_tol=1e-4):
+        raise ValueError(f"NEVER render fractional end frame {end_frame}")
 
-    count = int(math.floor((end_frame - start_frame) / step + 1e-8)) + 1
+    count = end_integer - start_integer + 1
     if max_frames is not None:
         if max_frames <= 0:
             raise ValueError(f"max_frames must be positive, got {max_frames}")
         count = min(count, max_frames)
-    frame_numbers = [round(start_frame + index * step, 6) for index in range(count)]
-
-    needed_integer_frames: set[int] = set()
-    for frame_number in frame_numbers:
-        needed_integer_frames.add(int(math.floor(frame_number)))
-        needed_integer_frames.add(int(math.ceil(frame_number)))
+    frame_numbers = list(range(start_integer, start_integer + count))
+    needed_integer_frames = set(frame_numbers)
 
     integer_cache: dict[int, list[np.ndarray | None]] = {}
     integer_errors: dict[tuple[int, str], str] = {}
@@ -106,33 +89,20 @@ def build_ground_truth_timeline(
 
     timeline: list[dict[str, Any]] = []
     for frame_number in frame_numbers:
-        lower = int(math.floor(frame_number))
-        upper = int(math.ceil(frame_number))
-        alpha = float(frame_number - lower)
-        source = (
-            f"direct frame {lower:04d}"
-            if lower == upper
-            else f"linear interpolation {lower:04d}/{upper:04d} (alpha={alpha:g})"
-        )
+        source = f"direct frame {frame_number:04d}"
         contours: list[np.ndarray] = []
         missing_contours: list[str] = []
         missing_details: dict[str, str] = {}
         for class_index, articulator in enumerate(classes):
-            lower_contour = integer_cache[lower][class_index]
-            upper_contour = integer_cache[upper][class_index]
-            if lower_contour is None or upper_contour is None:
+            contour = integer_cache[frame_number][class_index]
+            if contour is None:
                 contours.append(np.full((50, 2), np.nan, dtype=np.float32))
                 missing_contours.append(articulator)
-                reasons = []
-                if lower_contour is None:
-                    reasons.append(f"{lower:04d}: {integer_errors[(lower, articulator)]}")
-                if upper != lower and upper_contour is None:
-                    reasons.append(f"{upper:04d}: {integer_errors[(upper, articulator)]}")
-                missing_details[articulator] = "; ".join(reasons)
-            elif lower == upper:
-                contours.append(lower_contour)
+                missing_details[articulator] = (
+                    f"{frame_number:04d}: {integer_errors[(frame_number, articulator)]}"
+                )
             else:
-                contours.append((1.0 - alpha) * lower_contour + alpha * upper_contour)
+                contours.append(contour)
         flattened = np.asarray(contours, dtype=np.float32).reshape(len(classes), 100)
         timeline.append(
             {
@@ -143,9 +113,9 @@ def build_ground_truth_timeline(
                 "phoneme": "n/a",
                 "held": False,
                 "ground_truth_source": source,
-                "ground_truth_lower_frame": lower,
-                "ground_truth_upper_frame": upper,
-                "ground_truth_interpolation_alpha": alpha,
+                "ground_truth_lower_frame": frame_number,
+                "ground_truth_upper_frame": frame_number,
+                "ground_truth_interpolation_alpha": 0.0,
                 "missing_ground_truth_contours": missing_contours,
                 "missing_ground_truth_details": missing_details,
             }
@@ -172,6 +142,10 @@ def aggregate_state(state: dict[str, Any], config: dict[str, Any], speaker: int,
             if spk != speaker or ses != session:
                 continue
             frame_number = float(frame[2])
+            rounded_frame = int(round(frame_number))
+            if not math.isclose(frame_number, rounded_frame, rel_tol=0.0, abs_tol=1e-4):
+                continue
+            frame_number = float(rounded_frame)
             item = accum.setdefault(
                 frame_number,
                 {
@@ -218,19 +192,33 @@ def prediction_denorm_summary() -> dict[str, Any]:
 
 
 def build_timeline(rows: list[dict[str, Any]], step: float, max_frames: int | None) -> list[dict[str, Any]]:
-    by_frame = {round(float(row["frame_number"]) * 2) / 2: row for row in rows}
+    if not math.isclose(step, 1.0, rel_tol=0.0, abs_tol=1e-8):
+        raise ValueError("NEVER render fractional frames; timeline step must be 1.0")
+    integer_rows = [
+        row
+        for row in rows
+        if math.isclose(
+            float(row["frame_number"]),
+            round(float(row["frame_number"])),
+            rel_tol=0.0,
+            abs_tol=1e-4,
+        )
+    ]
+    if not integer_rows:
+        raise RuntimeError("No integer-numbered frames available for rendering")
+    by_frame = {int(round(float(row["frame_number"]))): row for row in integer_rows}
     start = min(by_frame)
     end = max(by_frame)
-    count = int(round((end - start) / step)) + 1
+    count = end - start + 1
     timeline = []
-    previous = rows[0]
+    previous = by_frame[start]
     for index in range(count):
-        frame_number = round(start + index * step, 4)
+        frame_number = start + index
         row = by_frame.get(frame_number)
         if row is None:
             row = dict(previous)
-            row["frame_number"] = frame_number
-            row["frame"] = frame_token(frame_number)
+            row["frame_number"] = float(frame_number)
+            row["frame"] = frame_token(float(frame_number))
             row["held"] = True
         else:
             previous = row
