@@ -750,7 +750,7 @@ def load_bucket_raw(
         raw_path = raw_session_part_path(cache_dir, config, str(bucket), str(session))
         if not raw_path.exists():
             raise FileNotFoundError(f"Missing raw session cache: {raw_path}")
-        raw = torch.load(raw_path, map_location="cpu")["raw"]
+        raw = torch.load(raw_path, map_location="cpu", weights_only=False)["raw"]
         features.extend(raw["features"])
         contours.extend(raw["contours"])
         frames.extend(raw["frames"])
@@ -826,7 +826,7 @@ def assemble_bucket(
 ) -> Dict[str, Any]:
     bucket_path = cache_dir / "bucket_parts" / split_key / f"{bucket}.pt"
     if bucket_path.exists() and not rebuild:
-        return torch.load(bucket_path, map_location="cpu")["state"]
+        return torch.load(bucket_path, map_location="cpu", weights_only=False)["state"]
 
     features, contours, frames, phonemes, length_datas = load_bucket_raw(config, cache_dir, split_key, bucket)
 
@@ -1061,7 +1061,7 @@ def validate_cache(config: Dict[str, Any], cache_dir: Path, splits: Iterable[str
     validation = {}
     for split_key in splits:
         path = cache_dir / SPLIT_FILES[split_key]
-        state = torch.load(path, map_location="cpu")
+        state = torch.load(path, map_location="cpu", weights_only=False)
         features = state["features"]
         labels = state["labels"]
         if features.ndim != 3 or features.shape[2] != int(config["input_layer"]):

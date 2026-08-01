@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=12)
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--max-frames", type=int, default=None)
+    parser.add_argument(
+        "--integer-frames-only",
+        action="store_true",
+        help="Render only integer ASD1 frame ids, matching the server comparison-video format.",
+    )
     parser.add_argument("--background", choices=("dark", "gray"), default="gray")
     parser.add_argument("--mri-dicom-dir", type=Path, default=None)
     parser.add_argument("--mri-npy-dir", type=Path, default=None)
@@ -73,7 +78,11 @@ def frame_label(frame: np.ndarray) -> str:
     return f"P{speaker}/S{session}/{suffix}"
 
 
-def make_items(state: dict[str, Any], max_frames: int | None) -> list[tuple[float, int, int]]:
+def make_items(
+    state: dict[str, Any],
+    max_frames: int | None,
+    integer_frames_only: bool = False,
+) -> list[tuple[float, int, int]]:
     frames = state["frames"]
     lengths = state["lengths"]
     items: list[tuple[float, int, int]] = []
@@ -82,6 +91,8 @@ def make_items(state: dict[str, Any], max_frames: int | None) -> list[tuple[floa
         length = int(lengths[seq_idx])
         for offset in range(length):
             frame = frames[seq_idx, offset].detach().cpu().numpy()
+            if integer_frames_only and not np.isclose(float(frame[2]), round(float(frame[2])), atol=1e-4):
+                continue
             label = tuple(float(x) for x in frame.tolist())
             if label in seen:
                 continue
@@ -186,7 +197,7 @@ def main() -> None:
     rmse_class_indices = [idx for idx, name in enumerate(classes) if name not in excluded_set]
     if not rmse_class_indices:
         raise ValueError("RMSE exclusion removed all classes")
-    items = make_items(state, args.max_frames)
+    items = make_items(state, args.max_frames, bool(args.integer_frames_only))
     if not items:
         raise RuntimeError(f"No frames to render from {args.predictions}")
 
@@ -260,6 +271,7 @@ def main() -> None:
         "fps": int(args.fps),
         "scale": int(args.scale),
         "frames": len(items),
+        "integer_frames_only": bool(args.integer_frames_only),
         "mean_frame_rmse_mm": None if not rmses else float(np.mean(rmses)),
         "excluded_rmse_classes": excluded_rmse_classes,
         "prediction_only": "labels_raw" not in state,
