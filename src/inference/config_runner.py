@@ -65,6 +65,8 @@ def render_args(render: dict[str, Any], output_path: Path) -> list[str]:
     ]
     if render.get("max_frames") is not None:
         args.extend(["--max-frames", str(render["max_frames"])])
+    if bool(render.get("integer_frames_only", False)):
+        args.append("--integer-frames-only")
     mri_dicom_dir = resolve_path(render.get("mri_dicom_dir"))
     mri_npy_dir = resolve_path(render.get("mri_npy_dir"))
     if mri_dicom_dir is not None:

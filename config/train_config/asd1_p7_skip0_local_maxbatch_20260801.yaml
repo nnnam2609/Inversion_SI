@@ -1,0 +1,102 @@
+experiment_name: experiment_asd1_p7_skip0_local_maxbatch_20260801
+dataset_type: asd1
+datadir: C:/Users/nhnguyen/PhD_A2A/Data/Artspeech_database
+asd1_datadir: C:/Users/nhnguyen/PhD_A2A/Data/Artspeech_database
+asd1_annotation_dir: C:/Users/nhnguyen/PhD_A2A/Preprocess/inference
+phonemesdir: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/.worktrees/p7_asd1_skip0_main/config/list_phonemes.json
+data_save: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/training
+folder_save: p7_skip0_local_maxbatch_20260801
+
+n_epochs: 500
+batch_size: 10
+learning_rate: 0.001
+weight_decay: 0.001
+optimizer: adam
+patience: 10
+save_every: 10
+num_layers: 1
+input_layer: 39
+hidden_layer: 300
+output_layer: 100
+context_window: 0
+sequence_length: 80
+added_frames: 0
+ms_image: 19.98
+n_mfcc: 13
+hop_length_ratio: 10
+window_length_ms: 25
+skip_ms: 0
+nbr_phonemes: 1
+phonemes: false
+alpha: 1
+loss_function: mse_all_articulators_full_asd1_single_task5
+mode: train
+model: single_task5_asd1_p7_skip0_local_maxbatch_20260801
+tag: p7_skip0_train_global_pooledraw_local_maxbatch_20260801
+seed: 42
+
+classes:
+  - arytenoid-cartilage
+  - epiglottis
+  - lower-lip
+  - pharynx
+  - soft-palate-midline
+  - tongue
+  - upper-lip
+  - vocal-folds
+  - thyroid-cartilage
+  - lower-incisor
+  - upper-incisor
+
+train_sequences:
+  P7:
+    - S1
+    - S2
+    - S3
+    - S4
+    - S5
+    - S6
+    - S7
+    - S8
+    - S9
+    - S10
+    - S11
+    - S12
+valid_sequences:
+  P7:
+    - S13
+    - S14
+test_sequences:
+  P7:
+    - S15
+    - S16
+inference_sequences:
+  P7:
+    - S15
+
+input_type: mfcc
+phoneme_tier_index: 1
+skip_outlier_detection: true
+skip_test_plots: true
+skip_tract_variables: true
+use_mri: false
+cache_dataset: true
+rebuild_dataset_cache: false
+rebuild_split_cache: false
+session_cache_dir: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/cache
+split_cache_dir: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/cache
+dataset_cache_dir: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/cache
+skip_bad_session_cache: false
+load_labels_progress_every: 100
+contour_file_workers: 8
+repair_textgrid_bounds: true
+pseudo_textgrid_on_parse_error: true
+skip_missing_contour_chunks: true
+num_workers: 0
+pin_memory: false
+persistent_workers: false
+prefetch_factor: 2
+normalization_mode: train_global
+normalization_fit_split: train_sequences
+normalization_fit_estimator: pooled_frames
+normalization_std_policy: raw_positive

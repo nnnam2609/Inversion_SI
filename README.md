@@ -64,6 +64,20 @@ repro/<run>/splits/session_cache_validation.json
 
 No `bucket_parts` are required in the current pipeline.
 
+### ASD1 alignment policy
+
+ASD1 is aligned from contour frame 0. Its mandatory/default alignment is
+`added_frames: 0` and `skip_ms: 0`; preprocessing rejects non-zero ASD1
+offsets. The former ASD1 `added_frames: 20` setting shifted audio by about
+400 ms relative to the contour timeline and produced invalid raw caches,
+split caches, training runs, and evaluations. ASD2 keeps its dataset-specific
+20-frame preprocessing offset.
+
+After changing alignment, rebuild both the reusable ASD1 session cache and
+every ASD1 split cache. Do not combine an offset-0 raw cache with an old
+offset-20 split cache. See [ASD1_ALIGNMENT_POLICY.md](ASD1_ALIGNMENT_POLICY.md)
+for migration and provenance rules.
+
 ## Preprocess
 
 Preprocess configs only describe data/session information and where to write the reusable session cache.

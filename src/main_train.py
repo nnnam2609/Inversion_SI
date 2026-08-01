@@ -9,7 +9,7 @@ import torch
 import mlflow
 import mlflow.pytorch
 import torch.multiprocessing as mp
-from utils.experiment_loader import  prepare_experiment, create_mlflow_experiment, get_run_id_by_name, extract_experiment_and_run_name
+from utils.experiment_loader import  prepare_experiment, create_mlflow_experiment, get_run_id_by_name, extract_experiment_and_run_name, mlflow_tracking_uri
 import numpy as np
 
 
@@ -84,7 +84,7 @@ def main(rank: int, world_size: int, config:dict, model_type: str, phonemes_arg:
     #     print(f"p95_mris batch shape: {batch['p95'].shape}")
     #     break
     # return
-    mlflow.set_tracking_uri(f"{config['data_save']}/mlruns")
+    mlflow.set_tracking_uri(mlflow_tracking_uri(config["data_save"]))
     # total = 0
     # for batch in train_dataloader:
     #     total_mb = print_batch_memory(batch)
@@ -134,6 +134,9 @@ if __name__ == "__main__":
     world_size = torch.cuda.device_count()
     if world_size <= 0:
         raise RuntimeError("No CUDA GPU is visible to PyTorch; run training inside an OAR GPU allocation with CUDA devices exposed.")
-    mp.spawn(main, args=(world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path), nprocs=world_size)
+    if world_size == 1:
+        main(0, world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path)
+    else:
+        mp.spawn(main, args=(world_size, config, model_type, phonemes_arg, autoencoder_arg, checkpoint_path), nprocs=world_size)
     #dist.destroy_process_group()
     

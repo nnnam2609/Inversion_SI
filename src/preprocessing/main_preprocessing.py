@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import psutil
 import subprocess
 import time
+from pathlib import Path
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 from transformers import AutoFeatureExtractor, HubertModel
 
@@ -26,6 +27,33 @@ def _numeric_id(value):
     if not digits:
         raise ValueError(f"Cannot extract numeric id from {value!r}")
     return float(digits)
+
+
+def _contour_folder_identity(image_folder):
+    """Return numeric speaker/session ids for <speaker>/<session>/contours."""
+
+    contour_folder = Path(image_folder)
+    session_folder = contour_folder.parent
+    speaker_folder = session_folder.parent
+    return _numeric_id(speaker_folder.name), _numeric_id(session_folder.name)
+
+
+def _alignment_offsets(config):
+    """Resolve dataset alignment and reject the invalid legacy ASD1 offset."""
+
+    dataset_type = str(config.get("dataset_type", "")).strip().lower()
+    if dataset_type == "asd1":
+        added_frames = int(config.get("added_frames", 0))
+        configured_skip_ms = float(config.get("skip_ms", 0.0))
+        if added_frames != 0 or not np.isclose(configured_skip_ms, 0.0, atol=1e-9):
+            raise ValueError(
+                "ASD1 is aligned from frame 0: added_frames and skip_ms must both be 0. "
+                "Legacy ASD1 offset-20 caches are invalid and must be rebuilt."
+            )
+        return 0, 0.0
+
+    added_frames = int(config["added_frames"])
+    return added_frames, added_frames * float(config["ms_image"])
 
 
 def _dataset_type_for_sequence(config, sequence):
@@ -106,15 +134,14 @@ class Corpus(Dataset):
         self.rank = rank
         self.sequences = sequences
         self.config = config
+        self.added_frames, self.skip_ms = _alignment_offsets(config)
+        self.ms_image = config['ms_image']
         self.all_phonemes = self.get_phonemes_list()
         self.audio_files, self.textgrid_files, self.images_files = self.collect_files()
         print(f"Finish collecting files")
         self.n_mfcc = config['n_mfcc']
         self.window_length_ms = config['window_length_ms']
         self.hop_length_ratio = config['hop_length_ratio']
-        self.added_frames = config['added_frames']
-        self.ms_image = config['ms_image']
-        self.skip_ms = self.added_frames * self.ms_image
         
     def __len__(self) -> int:
         """
@@ -248,12 +275,27 @@ class Corpus(Dataset):
     def _resolve_asd1_session(self, sequence: str, session: str) -> tuple:
         speaker = str(sequence)
         datadir = self.config.get("asd1_datadir", self.config["datadir"])
-        other_folder = os.path.join(datadir, speaker, "OTHER", session)
-        dcm_folder = os.path.join(datadir, speaker, "DCM_2D", session)
-        if not os.path.isdir(other_folder):
-            raise FileNotFoundError(f"Missing ASD1 OTHER session folder: {other_folder}")
-        if not os.path.isdir(dcm_folder):
-            raise FileNotFoundError(f"Missing ASD1 DCM_2D session folder: {dcm_folder}")
+        speaker_root = os.path.join(datadir, speaker)
+        speaker_root_candidates = [
+            speaker_root,
+            os.path.join(speaker_root, speaker),
+        ]
+        resolved_root = next(
+            (
+                root
+                for root in speaker_root_candidates
+                if os.path.isdir(os.path.join(root, "OTHER", session))
+                and os.path.isdir(os.path.join(root, "DCM_2D", session))
+            ),
+            None,
+        )
+        if resolved_root is None:
+            raise FileNotFoundError(
+                "Missing ASD1 OTHER/DCM_2D session folders under: "
+                + " or ".join(speaker_root_candidates)
+            )
+        other_folder = os.path.join(resolved_root, "OTHER", session)
+        dcm_folder = os.path.join(resolved_root, "DCM_2D", session)
 
         audio_path = os.path.join(other_folder, f"DENOISED_SOUND_{speaker}_{session}.wav")
         textgrid_path = os.path.join(other_folder, f"TEXT_ALIGNMENT_{speaker}_{session}.textgrid")
@@ -1131,6 +1173,7 @@ class Corpus(Dataset):
 
         all_mris = []
         articulator = self.config["classes"][0]
+        folder_number, subfolder_number = _contour_folder_identity(image_folder)
         for image_numbers in list_image:
             num_sequences = len(image_numbers)
             sequence_images = np.zeros((num_sequences, 3))
@@ -1141,15 +1184,11 @@ class Corpus(Dataset):
                 if  image_number == int_image_number:
                     image_filename  = f"{int_image_number:04d}_{articulator}.npy"
                     image_path = os.path.join(image_folder, image_filename)
-                    parts = image_path.split("/")
-                    folder_number = parts[-4]  # "1775" or "P1"
-                    subfolder = parts[-3]  # "S19"
-                    subfolder_number = subfolder[1:]  # Remove the 'S' from "S19"
-                    file_name = os.path.splitext(parts[-1])[0]  # "0190_tongue" without ".npy"
+                    file_name = os.path.splitext(os.path.basename(image_path))[0]
                     file_name_number = file_name.split('_')[0]
                     image_data = np.array([
-                        _numeric_id(folder_number),
-                        _numeric_id(subfolder_number),
+                        folder_number,
+                        subfolder_number,
                         float(file_name_number),
                     ], dtype=float)
                     
@@ -1158,15 +1197,11 @@ class Corpus(Dataset):
                     rounded_down = int(np.floor(image_number))
                     image_filename  = f"{rounded_down:04d}.5_{articulator}.npy"
                     image_path = os.path.join(image_folder, image_filename)
-                    parts = image_path.split("/")
-                    folder_number = parts[-4]  # "1775" or "P1"
-                    subfolder = parts[-3]  # "S19"
-                    subfolder_number = subfolder[1:]  # Remove the 'S' from "S19"
-                    file_name = os.path.splitext(parts[-1])[0]  # "0190_tongue" without ".npy"
+                    file_name = os.path.splitext(os.path.basename(image_path))[0]
                     file_name_number = file_name.split('_')[0]
                     image_data = np.array([
-                        _numeric_id(folder_number),
-                        _numeric_id(subfolder_number),
+                        folder_number,
+                        subfolder_number,
                         float(file_name_number.split(".")[0]) + 0.5,
                     ], dtype=float)
                 if image_data is not None:

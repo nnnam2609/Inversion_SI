@@ -39,11 +39,19 @@ class Train:
         if checkpoint_path:
             self.initialize_model()
             self.start_epoch, self.best_loss, self.optimizer = self.load_checkpoint(checkpoint_path)
-            self.ddp_model = DDP(self.model, find_unused_parameters=True, device_ids=[gpu_id])
+            self.ddp_model = (
+                DDP(self.model, find_unused_parameters=True, device_ids=[gpu_id])
+                if dist.get_world_size() > 1
+                else self.model
+            )
             #self.ddp_model = DDP(self.model, device_ids=[gpu_id])
         else :     
             self.initialize_model()
-            self.ddp_model = DDP(self.model, find_unused_parameters=True, device_ids=[gpu_id])
+            self.ddp_model = (
+                DDP(self.model, find_unused_parameters=True, device_ids=[gpu_id])
+                if dist.get_world_size() > 1
+                else self.model
+            )
             #self.ddp_model = DDP(self.model, device_ids=[gpu_id])
             self.optimizer = torch.optim.Adam(self.ddp_model.parameters(), lr=config.get('learning_rate', 1e-3), weight_decay=config.get('weight_decay', 1e-5))
             
@@ -155,7 +163,8 @@ class Train:
                 if dist.get_rank() == 0 and early_stop :
                     print(f"Loss function doesn't increase.Training stop at epoch: {actual_epoch}")
                     stop_training_tensor[0] = 1
-                dist.broadcast(stop_training_tensor, src=0)
+                if dist.get_world_size() > 1:
+                    dist.broadcast(stop_training_tensor, src=0)
                 if stop_training_tensor.item() == 1:
                     break
         # print(f"End training")
@@ -531,7 +540,8 @@ class Train:
 
     def save_model(self, path):
             torch.save(self.best_ddp_model, f'{path}/final_model.pth')  # Use model.module to access the underlying model in DDP
-            torch.save(self.best_ddp_model.module.state_dict(), f'{path}/final_dict.pth')
+            model = self.best_ddp_model.module if hasattr(self.best_ddp_model, "module") else self.best_ddp_model
+            torch.save(model.state_dict(), f'{path}/final_dict.pth')
             #self.log_memory(stage=f"function save")
 
     def save_checkpoint(self, path, loss, epoch):

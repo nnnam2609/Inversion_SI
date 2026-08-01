@@ -33,8 +33,10 @@ def ddp_setup(rank: int, world_size: int) -> None:
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    # NCCL is unavailable on native Windows.  Keep the server path unchanged,
+    # but use PyTorch's Windows-supported backend for local one-GPU runs.
+    backend = "nccl" if os.name != "nt" and dist.is_nccl_available() else "gloo"
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
 def cleanup():

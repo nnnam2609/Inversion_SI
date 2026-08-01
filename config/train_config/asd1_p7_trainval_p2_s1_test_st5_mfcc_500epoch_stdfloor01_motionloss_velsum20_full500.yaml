@@ -19,12 +19,12 @@ hidden_layer: 300
 output_layer: 100
 context_window: 0
 sequence_length: 80
-added_frames: 20
+added_frames: 0
 ms_image: 19.98
 n_mfcc: 13
 hop_length_ratio: 10
 window_length_ms: 25
-skip_ms: 400
+skip_ms: 0
 nbr_phonemes: 1
 phonemes: false
 alpha: 1

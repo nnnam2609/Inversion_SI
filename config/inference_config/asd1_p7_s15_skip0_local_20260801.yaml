@@ -1,0 +1,38 @@
+run_name: asd1_p7_s15_skip0_local_20260801
+dataset: asd1
+note: >
+  P7/S15 evaluation for the local added_frames=0 retrain. Ground truth is
+  rendered solid and prediction dashed using the same per-articulator color.
+
+train_config: config/train_config/asd1_p7_skip0_local_maxbatch_20260801.yaml
+checkpoint: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/training/mlruns/340031710337921508/e3a90453942d448faa5c13e7e2efc22a/artifacts/final_dict.pth
+output_dir: C:/Users/nhnguyen/PhD_A2A/Inversion_SI/results/p7_skip0_main_retrain_20260801/evaluation/p7_s15
+device: cuda
+write_contours: false
+
+target:
+  speaker: 7
+  session: 15
+  split: test_sequences
+
+exclude_rmse_classes: []
+
+predict_only:
+  enabled: false
+
+eval:
+  enabled: true
+  video_name: p7_s15_skip0_pred_dashed_gt_solid.mp4
+  write_contours: false
+
+render:
+  fps: 50
+  scale: 4
+  background: gray
+  max_frames:
+  integer_frames_only: true
+  mri_dicom_dir: C:/Users/nhnguyen/PhD_A2A/Data/Artspeech_database/P7/P7/DCM_2D/S15
+  dicom_index_method: filename
+  dicom_index_workers: 16
+  dicom_read_workers: 8
+  frame_offset: 0

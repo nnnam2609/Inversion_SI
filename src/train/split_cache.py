@@ -104,7 +104,7 @@ def _validate_one_session(
         item["error"] = "missing_contour_npz"
         return False, item
     try:
-        payload = torch.load(raw_path, map_location="cpu")
+        payload = torch.load(raw_path, map_location="cpu", weights_only=False)
     except Exception as exc:
         item["error"] = f"raw_session_load_failed: {exc!r}"
         return False, item
@@ -166,7 +166,11 @@ def validate_session_cache(
 
 
 def _load_raw_session(config: Dict[str, Any], cache_dir: Path, bucket: str, session: str) -> Dict[str, Any]:
-    payload = torch.load(raw_session_part_path(cache_dir, config, bucket, session), map_location="cpu")
+    payload = torch.load(
+        raw_session_part_path(cache_dir, config, bucket, session),
+        map_location="cpu",
+        weights_only=False,
+    )
     return payload["raw"]
 
 

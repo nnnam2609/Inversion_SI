@@ -1,7 +1,13 @@
 import os
 import mlflow
+from pathlib import Path
 from typing import Any
 from src.utils.tools import create_folder
+
+
+def mlflow_tracking_uri(data_save: str) -> str:
+    """Return a cross-platform local MLflow file-store URI."""
+    return (Path(data_save).resolve() / "mlruns").as_uri()
 
 
 def create_mlflow_experiment(config:dict):
@@ -45,7 +51,7 @@ def create_experiment(experiment_name: str, config:dict) -> str:
         config = {'data_save': '/path/to/mlruns', 'tag': 'dev'}
         experiment_id = create_experiment('experiment_1', config)
     '''
-    mlflow.set_tracking_uri(f"{config['data_save']}/mlruns")
+    mlflow.set_tracking_uri(mlflow_tracking_uri(config["data_save"]))
     try:
         experiment_id = mlflow.create_experiment(name=experiment_name, tags={"env":config["tag"]}) 
     except:
